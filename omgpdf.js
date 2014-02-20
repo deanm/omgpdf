@@ -770,79 +770,94 @@ function PDFReader(raw) {
     return obj;
   }
 
+  function consume_object_at(offset) {
+    var savepos = lexer.cur_pos();
+    lexer.set_pos(offset);
+    var obj = consume_object();
+    lexer.set_pos(savepos);
+    return obj;
+  }
+
   function obj_key(obj) {
     if (obj.t !== 'obj' && obj.t !== 'objref') throw "Can't key object.";
     return obj.v.id + '_' + obj.v.gen;
   }
 
-  function filter_stream(stream) {
-    if (stream.t !== 'stream') throw "Not a stream.";
-    var filter = dict_get(stream.v.d, '/Filter');
-    if (filter === undefined) return callback(stream, false, stream.v.s);
-    if (filter.v === '/FlateDecode') {
-      var data = new Uint8Array(stream.v.s);
-      var s = new pdfjsstream.Stream(data);
-      var params_dict = dict_get(stream.v.d, '/DecodeParms');
-      var filter = null;
-      if (params_dict) {
-        var params = {
-          get: function(x) {
-            var v = dict_get(params_dict, '/' + x);
-            return v ? v.v : undefined;
-          },
-        };
-        filter = new pdfjsstream.PredictorStream(
-            new pdfjsstream.FlateStream(s), params);
-      } else {
-        filter = new pdfjsstream.FlateStream(s);
-      }
-      return filter.getBytes();
-    } else if (filter.v === '/LZWDecode') {
-      /*
-      // How do we get the output buffer size right?
-      var output = new Buffer(1024 * 1024 * 10);
-      var early_change = dict_get(stream.v.d, '/EarlyChange');
-      var early_amount = (early_change !== undefined &&
-                          early_change.t === 'num' &&
-                          early_change.v === 0) ? 0 : 1;
+  function make_filter_stream(typ, stream, dict) {
+    var params_dict = dict_get(dict, '/DecodeParms');
+    var params = null;
+    if (params_dict) {
+      var params = {
+        get: function(x) {
+          var v = dict_get(params_dict, '/' + x);
+          return v ? v.v : undefined;
+        },
+      };
+    }
 
-      if (early_amount === 0)
-        console.log("Warning, untested EarlyChange of 0.");
+    switch (typ) {
+      case '/FlateDecode':
+        var filter = null;
+        if (params !== null) {
+          return new pdfjsstream.PredictorStream(
+              new pdfjsstream.FlateStream(stream), params);
+        }
+        return new pdfjsstream.FlateStream(stream);
+      case '/LZWDecode':
+        /*
+        // How do we get the output buffer size right?
+        var output = new Buffer(1024 * 1024 * 10);
+        var early_change = dict_get(stream.v.d, '/EarlyChange');
+        var early_amount = (early_change !== undefined &&
+                            early_change.t === 'num' &&
+                            early_change.v === 0) ? 0 : 1;
 
-      var len = PDFLZWOutputIndexStream(
-          stream.v.s, stream.v.s.length, 0, 8, early_amount, output);
-      output = output.slice(0, len);
-      */
-      return callback(stream, false, stream.v.s);
-    } else if (filter.v === '/DCTDecode') {
-      return callback(stream, false, stream.v.s);
-    } else {
-      console.trace(stream.v.d);
-      throw "Unknown stream filter.";
+        if (early_amount === 0)
+          console.log("Warning, untested EarlyChange of 0.");
+
+        var len = PDFLZWOutputIndexStream(
+            stream.v.s, stream.v.s.length, 0, 8, early_amount, output);
+        output = output.slice(0, len);
+        */
+        throw 'xx';
+      case '/CCITTFaxDecode': case '/CCF':
+        return new pdfjsstream.CCITTFaxStream(stream, params);
+      default:
+        return null;
+        //throw "Unknown stream filter: " + typ;
     }
   }
 
-  this.process_streams = function(modifier, done) {
-    var inflight = 1;  // "retain" guard against sync/async.
-    for (var i = 0, il = body.length; i < il; ++i) {
-      var obj = body[i];
+  function filter_stream(stream) {
+    if (stream.t !== 'stream') throw "Not a stream.";
+    var filter = dict_get(stream.v.d, '/Filter');
+    if (filter === undefined) return stream.v.s;
+
+    var data = new Uint8Array(stream.v.s);
+    var filter_stream = make_filter_stream(
+        filter.v, new pdfjsstream.Stream(data), stream.v.d);
+    if (filter_stream === null) return null;
+    return filter_stream.getBytes();
+  }
+
+  this.process_streams = function(callback) {
+    for (var i = 0, il = xref_table.length; i < il; ++i) {
+      var xref = xref_table[i];
+      if (!xref) continue;  // FIXME Free entries?
+      if (xref.o !== null) continue;  // TODO
+      var obj = consume_object_at(xref.i);
       if (obj.t !== 'obj') throw "Non-object body object.";
       var inner = obj.v.v;
       if (inner.t !== 'stream') continue;
-      ++inflight;
-      process_stream(inner, function(inner, wasinflated, data) {
-        if (!wasinflated) {
-          if (--inflight === 0) done();
-        } else {
-          zlib.deflate(modifier(data), function(err, comp) {
-            if (err !== null) throw "Error compressing.";
-            inner.v.s = comp;
-            if (--inflight === 0) done();
-          });
-        }
-      });
+      var data = filter_stream(inner);
+      if (data === null) {
+        callback(inner, false, inner.v.s);
+        //inner.v.s = callback(data);
+      } else {
+        callback(inner, true, data);
+        //inner.v.s = callback(data);
+      }
     }
-    if (--inflight === 0) done();  // "release" guard again sync/async.
   };
 
   // Parse through the PDF.  There are a lot of different possibilities,
