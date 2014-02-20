@@ -462,7 +462,145 @@ function PDFLexer(buf) {
   };
 }
 
-function PDF(raw) {
+function PDFWriter(buf) {
+
+  function emit_string(buf, bufp, str) {
+    for (var i = 0, il = str.length; i < il; ++i) {
+      buf[bufp++] = str.charCodeAt(i) & 0xff;
+    }
+    return bufp;
+  }
+
+  function emit_string_line(buf, bufp, str) {
+    for (var i = 0, il = str.length; i < il; ++i) {
+      buf[bufp++] = str.charCodeAt(i) & 0xff;
+    }
+    buf[bufp++] = 10;
+    return bufp;
+  }
+
+  function emit_object(buf, bufp, obj) {
+    switch (obj.t) {
+      // 3.2.1 - Boolean Objects.
+      case 'bool':
+        bufp = emit_string(buf, bufp, obj.v === true ? 'true' : 'false');
+        break;
+      // 3.2.2 - Numeric Objects.
+      case 'num':
+        bufp = emit_string(buf, bufp, obj.v + '');
+        break;
+      // 3.2.3 - String Objects.
+      case 'str':
+        var str = obj.v.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').
+          replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/[\b]/g, '\\b').
+          replace(/\f/g, '\\f').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+        bufp = emit_string(buf, bufp, '(' + str + ')');
+        break;
+      case 'hexstr':
+        bufp = emit_string(buf, bufp, '<' + obj.v + '>');
+        break;
+      // 3.2.4 - Name Objects.
+      case 'name':
+        bufp = emit_string(buf, bufp, obj.v);
+        break;
+      // 3.2.5 - Array Objects.
+      case 'array':
+        bufp = emit_string(buf, bufp, '[');
+        var a = obj.v;
+        for (var i = 0, il = a.length; i < il; ++i) {
+          bufp = emit_object(buf, bufp, a[i]);
+          bufp = emit_string(buf, bufp, ' ');
+        }
+        bufp = emit_string(buf, bufp, ']');
+        break;
+      // 3.2.6 - Dictionary Objects.
+      case 'dict':
+        bufp = emit_string(buf, bufp, '<<');
+        var a = obj.v;
+        // Personally I think this makes more sense space wise, because I would
+        // Think that a dictionary like /Key1/Val1/Key2/Key2 should parse, but
+        // I am just following an example PDF and it seems to just do
+        // KEY1 VAL1KEY2 VAL2
+        /*
+        for (var i = 0, il = a.length; i < il; ++i) {
+          if (a[i].t !== 'name')
+            bufp = emit_string(buf, bufp, ' ');
+          bufp = emit_object(buf, bufp, a[i]);
+        }
+        */
+        for (var i = 1, il = a.length; i < il; i += 2) {
+          bufp = emit_object(buf, bufp, a[i-1]);
+          bufp = emit_string(buf, bufp, ' ');
+          bufp = emit_object(buf, bufp, a[i]);
+        }
+        bufp = emit_string_line(buf, bufp, '>>');
+        break;
+      // 3.2.8 - Null Object.
+      case 'null':
+        bufp = emit_string(buf, bufp, 'null');
+        break;
+      // 3.2.9 - Indirect Objects.
+      case 'obj':
+        bufp = emit_string_line(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' obj');
+        bufp = emit_object(buf, bufp, obj.v.v);
+        bufp = emit_string_line(buf, bufp, '');
+        bufp = emit_string_line(buf, bufp, 'endobj');
+        break;
+      case 'objref':
+        bufp = emit_string(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' R');
+        break;
+      case 'stream':
+        bufp = emit_object(buf, bufp, obj.v.d);
+        bufp = emit_string_line(buf, bufp, 'stream');
+        obj.v.s.copy(buf, bufp);
+        bufp += obj.v.s.length;
+        bufp = emit_string(buf, bufp, 'endstream');
+        break;
+      default:
+        console.log('Unknown in emit: ' + obj.t);
+    }
+    return bufp;
+  }
+
+  this.write = function(header, body, tailer_dict) {
+    var xref_table = [ ];
+
+    var bufp = 0;
+
+    bufp = emit_string_line(buf, bufp, header);
+    bufp = emit_string_line(buf, bufp, "%\xc7\xec\x8f\xa2");
+
+    for (var i = 0, il = body.length; i < il; ++i) {
+      var obj = body[i];
+      if (obj.t !== 'obj') throw "Non-object body object.";
+      xref_table[obj.v.id] = bufp;
+      bufp = emit_object(buf, bufp, obj);
+    }
+
+    var offset_to_xrefs = bufp;
+    bufp = emit_string_line(buf, bufp, 'xref');
+    bufp = emit_string_line(buf, bufp, '0 ' + xref_table.length);
+    bufp = emit_string_line(buf, bufp, '0000000000 65535 f ');
+    for (var i = 1, il = xref_table.length; i < il; ++i) {
+      var val = xref_table[i];
+      bufp = emit_string_line(buf, bufp, zero_pad(10, val) + ' 00000 n ');
+    }
+    bufp = emit_string_line(buf, bufp, 'trailer');
+    bufp = emit_object(buf, bufp, trailer_dict);
+    /*
+    bufp = emit_object(buf, bufp, {v: [ {v: '/Size', t: 'name'},
+                                        {v: xref_table.length, t: 'num'},
+                                        {v: '/Root', t: 'name'},
+                                        {v: '/Size', t: 'name'},
+                                      ], t: 'dict'});
+    */
+    bufp = emit_string_line(buf, bufp, offset_to_xrefs + '');
+    bufp = emit_string_line(buf, bufp, '%%EOF');
+    return bufp;
+  }
+}
+
+function PDFReader(raw) {
   var lexer = new PDFLexer(raw);
   var header = lexer.consume_line();
 
@@ -612,141 +750,6 @@ function PDF(raw) {
     return obj;
   }
 
-  function emit_string(buf, bufp, str) {
-    for (var i = 0, il = str.length; i < il; ++i) {
-      buf[bufp++] = str.charCodeAt(i) & 0xff;
-    }
-    return bufp;
-  }
-
-  function emit_string_line(buf, bufp, str) {
-    for (var i = 0, il = str.length; i < il; ++i) {
-      buf[bufp++] = str.charCodeAt(i) & 0xff;
-    }
-    buf[bufp++] = 10;
-    return bufp;
-  }
-
-  function emit_object(buf, bufp, obj) {
-    switch (obj.t) {
-      // 3.2.1 - Boolean Objects.
-      case 'bool':
-        bufp = emit_string(buf, bufp, obj.v === true ? 'true' : 'false');
-        break;
-      // 3.2.2 - Numeric Objects.
-      case 'num':
-        bufp = emit_string(buf, bufp, obj.v + '');
-        break;
-      // 3.2.3 - String Objects.
-      case 'str':
-        var str = obj.v.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').
-          replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/[\b]/g, '\\b').
-          replace(/\f/g, '\\f').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-        bufp = emit_string(buf, bufp, '(' + str + ')');
-        break;
-      case 'hexstr':
-        bufp = emit_string(buf, bufp, '<' + obj.v + '>');
-        break;
-      // 3.2.4 - Name Objects.
-      case 'name':
-        bufp = emit_string(buf, bufp, obj.v);
-        break;
-      // 3.2.5 - Array Objects.
-      case 'array':
-        bufp = emit_string(buf, bufp, '[');
-        var a = obj.v;
-        for (var i = 0, il = a.length; i < il; ++i) {
-          bufp = emit_object(buf, bufp, a[i]);
-          bufp = emit_string(buf, bufp, ' ');
-        }
-        bufp = emit_string(buf, bufp, ']');
-        break;
-      // 3.2.6 - Dictionary Objects.
-      case 'dict':
-        bufp = emit_string(buf, bufp, '<<');
-        var a = obj.v;
-        // Personally I think this makes more sense space wise, because I would
-        // Think that a dictionary like /Key1/Val1/Key2/Key2 should parse, but
-        // I am just following an example PDF and it seems to just do
-        // KEY1 VAL1KEY2 VAL2
-        /*
-        for (var i = 0, il = a.length; i < il; ++i) {
-          if (a[i].t !== 'name')
-            bufp = emit_string(buf, bufp, ' ');
-          bufp = emit_object(buf, bufp, a[i]);
-        }
-        */
-        for (var i = 1, il = a.length; i < il; i += 2) {
-          bufp = emit_object(buf, bufp, a[i-1]);
-          bufp = emit_string(buf, bufp, ' ');
-          bufp = emit_object(buf, bufp, a[i]);
-        }
-        bufp = emit_string_line(buf, bufp, '>>');
-        break;
-      // 3.2.8 - Null Object.
-      case 'null':
-        bufp = emit_string(buf, bufp, 'null');
-        break;
-      // 3.2.9 - Indirect Objects.
-      case 'obj':
-        bufp = emit_string_line(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' obj');
-        bufp = emit_object(buf, bufp, obj.v.v);
-        bufp = emit_string_line(buf, bufp, '');
-        bufp = emit_string_line(buf, bufp, 'endobj');
-        break;
-      case 'objref':
-        bufp = emit_string(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' R');
-        break;
-      case 'stream':
-        bufp = emit_object(buf, bufp, obj.v.d);
-        bufp = emit_string_line(buf, bufp, 'stream');
-        obj.v.s.copy(buf, bufp);
-        bufp += obj.v.s.length;
-        bufp = emit_string(buf, bufp, 'endstream');
-        break;
-      default:
-        console.log('Unknown in emit: ' + obj.t);
-    }
-    return bufp;
-  }
-
-  this.write = function(buf) {
-    var xref_table = [ ];
-
-    var bufp = 0;
-
-    bufp = emit_string_line(buf, bufp, header);
-    bufp = emit_string_line(buf, bufp, "%\xc7\xec\x8f\xa2");
-
-    for (var i = 0, il = body.length; i < il; ++i) {
-      var obj = body[i];
-      if (obj.t !== 'obj') throw "Non-object body object.";
-      xref_table[obj.v.id] = bufp;
-      bufp = emit_object(buf, bufp, obj);
-    }
-
-    var offset_to_xrefs = bufp;
-    bufp = emit_string_line(buf, bufp, 'xref');
-    bufp = emit_string_line(buf, bufp, '0 ' + xref_table.length);
-    bufp = emit_string_line(buf, bufp, '0000000000 65535 f ');
-    for (var i = 1, il = xref_table.length; i < il; ++i) {
-      var val = xref_table[i];
-      bufp = emit_string_line(buf, bufp, zero_pad(10, val) + ' 00000 n ');
-    }
-    bufp = emit_string_line(buf, bufp, 'trailer');
-    bufp = emit_object(buf, bufp, trailer_dict);
-    /*
-    bufp = emit_object(buf, bufp, {v: [ {v: '/Size', t: 'name'},
-                                        {v: xref_table.length, t: 'num'},
-                                        {v: '/Root', t: 'name'},
-                                        {v: '/Size', t: 'name'},
-                                      ], t: 'dict'});
-    */
-    bufp = emit_string_line(buf, bufp, offset_to_xrefs + '');
-    bufp = emit_string_line(buf, bufp, '%%EOF');
-    return bufp;
-  }
-
   function obj_key(obj) {
     if (obj.t !== 'obj' && obj.t !== 'objref') throw "Can't key object.";
     return obj.v.id + '_' + obj.v.gen;
@@ -879,5 +882,6 @@ function PDF(raw) {
 }
 
 try {
-  exports.PDF = PDF;
+  exports.PDFReader = PDFReader;
+  exports.PDFWriter = PDFWriter;
 } catch(e) { };
