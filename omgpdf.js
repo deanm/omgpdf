@@ -165,6 +165,7 @@ function PDFLexer(buf) {
 
   this.cur_pos = function() { return bufp; };
   this.set_pos = function(p) { return bufp = p; };
+  this.end_pos = function() { return buflen; };
   this.is_eof = function() { return bufp >= buflen; };
   this.cur_byte = function() { return buf[bufp]; }
   this.adv_byte = function() { bufp++; };
@@ -230,6 +231,17 @@ function PDFLexer(buf) {
     bufp += chars.length;
     return data;
   };
+
+  this.seek_to_chars_bw = function(chars) {  // Cursor lands on begin of chars.
+    --bufp;  // Cursor points after.
+    var charslen = chars.length;
+    loop: for (; bufp >= 0; --bufp) {
+      for (var i = 0; i < charslen; ++i) {
+        if (buf[bufp + i] !== chars[i]) continue loop;
+      }
+      break;
+    }
+  }
 
   this.consume_token_including_cmt_and_ws = function() {
     var startp = bufp;
@@ -602,7 +614,6 @@ function PDFWriter(buf) {
 
 function PDFReader(raw) {
   var lexer = new PDFLexer(raw);
-  var header = lexer.consume_line();
 
   function consume_objectish() {
     var token = lexer.consume_token();
@@ -790,47 +801,6 @@ function PDFReader(raw) {
     }
   }
 
-  var body = [ ];
-  var objs = { };
-  while (!lexer.is_eof()) {
-    var obj = consume_object();
-    if (obj === null) break;  // EOF.
-    if (obj.t !== "obj") throw "Non-object object in body.";
-    body.push(obj);
-    var key = obj_key(obj);
-    if (key in objs) throw "Duplicate key: " + key;
-    objs[obj_key(obj)] = obj.v.v;
-  }
-
-  // if (consume_line() !== "xref") throw "Expected xref table.";
-
-  var total_num_xref_entries = 0;
-  while (true) {
-    var line = lexer.consume_line();
-    if (line.length === 0) continue;
-    if (line === 'trailer') break;
-    var pieces = line.split(' ');
-    var first_object = parseInt(pieces[0]), num_entries = parseInt(pieces[1]);
-    // each entry is 20 bytes long, including the new line.
-    total_num_xref_entries += num_entries;
-    lexer.adv_bytes(num_entries * 20);
-  }
-
-  var trailer_dict = consume_object();
-  //console.log(trailer_dict);
-
-  if (lexer.consume_line() !== '') throw "xx";
-  if (lexer.consume_line() !== 'startxref') throw "Expected startxref.";
-  var last_xref_section = parseInt(lexer.consume_line(), 10);
-  if (lexer.consume_line() !== '%%EOF') throw "Expected %%EOF.";
-
-  if (dict_get(trailer_dict, '/Size').v !== total_num_xref_entries)
-    throw "/Size doesn't match number of xref entries.";
-
-  var root = dict_get(trailer_dict, '/Root');
-  if (!root || root.t !== 'objref')
-    throw "Improper root.";
-
   this.process_streams = function(modifier, done) {
     var inflight = 1;  // "retain" guard against sync/async.
     for (var i = 0, il = body.length; i < il; ++i) {
@@ -852,7 +822,134 @@ function PDFReader(raw) {
       });
     }
     if (--inflight === 0) done();  // "release" guard again sync/async.
+  };
+
+  // Parse through the PDF.  There are a lot of different possibilities,
+  // updated PDFs, linearized, etc.  Not everything is supported yet.
+  // The best approach seems to be to work from the end of the file.
+
+  var first_trailer_dict = null;
+  var trailer_dict = null;
+  var num_objects = null;
+
+  function process_trailer() {
+    if (lexer.consume_line() !== 'trailer') throw 'Expected trailer';
+    trailer_dict = consume_object();
+
+    if (num_objects === null) {  // Appears right to keep the first /Size.
+      var num_objects_obj = dict_get(trailer_dict, '/Size');
+      if (num_objects_obj === undefined || num_objects_obj.t !== 'num')
+        throw 'Invalid /Size in trailer dictionary.';
+      num_objects = num_objects_obj.v;
+    }
+
+    if (first_trailer_dict === null) first_trailer_dict = trailer_dict;
   }
+
+  var xref_table = [ ];
+  var total_num_xref_entries = 0;
+
+  function process_xref_table() {
+    while (true) {  // xref sections.
+      var line = lexer.consume_line();
+      if (line.length === 0) continue;
+      if (line === 'trailer') break;  // TODO: correct?
+      var pieces = line.split(' ');
+      var first_object = parseInt(pieces[0]), num_entries = parseInt(pieces[1]);
+      total_num_xref_entries += num_entries;
+      //console.log([first_object, num_entries]);
+
+      // each entry is 20 bytes long, including the new line.
+      var end_of_section = lexer.cur_pos() + num_entries * 20;
+      for (var i = 0; i < num_entries; ++i) {
+        line = lexer.consume_line();
+        pieces = line.split(' ');
+        var offset = parseInt(pieces[0]), gen = parseInt(pieces[1]);
+        // FIXME: gen ?
+        if (pieces[2] === 'n') {
+          if (first_object + i in xref_table) throw 'dup';  // FIXME updates.
+          xref_table[first_object + i] = offset;
+        } else {   // FIXME: Not sure
+          //console.log(pieces);
+        }
+      }
+      lexer.set_pos(end_of_section);  // Just to make sure we seeked properly.
+    }
+  }
+
+  // First check the header at the beginning of the file.
+  var header = lexer.consume_line();
+  if (!/^%PDF-1\.[2-7]$/.test(header))  // TODO: Work out properly.
+    throw "Unsupported PDF version? " + header;
+
+  var linearized_dict = null;  // Non-null means file is linearized.
+  // NOTE: consume_object will eat through the comment that might be there to
+  // indicate that the file is binary, no special handling for that needed.
+  var maybe_linear_obj = consume_object();
+  if (maybe_linear_obj && maybe_linear_obj.t === 'obj') {
+    var lin_obj = dict_get(maybe_linear_obj.v.v, '/Linearized');
+    if (lin_obj !== undefined && lin_obj.t === 'num' && lin_obj.v === 1)
+      linearized_dict = lin_obj;
+  }
+
+  // console.log(linearized_dict !== null);
+
+  // Start working from the end.
+  lexer.set_pos(lexer.end_pos());
+
+  if (lexer.consume_line_bw() !== '%%EOF') throw 'Expected %%EOF';
+  var byte_offset_to_last_xref = parseInt(lexer.consume_line_bw());
+  if (lexer.consume_line_bw() !== 'startxref') throw 'Expected startxref';
+  // This is a bit ugly, but without making the lexer run backwards it is
+  // probably the easiest thing.  Search back to a beginning << and then back
+  // further to the trailer, hopefully we get to the right place.
+  lexer.seek_to_chars_bw([60, 60]);  // <<.
+  lexer.seek_to_chars_bw([116, 114, 97, 105, 108, 101, 114]);  // trailer.
+
+
+  lexer.set_pos(byte_offset_to_last_xref);
+
+  while (true) {
+    // console.log('Processing table at: ' + lexer.cur_pos());
+    if (lexer.consume_line() !== "xref") throw "Expected xref table.";
+    process_xref_table();
+    if (lexer.consume_line_bw() !== 'trailer') throw 'Expected trailer.';
+    process_trailer();
+    
+    var prev_obj = dict_get(trailer_dict, '/Prev');
+    if (prev_obj && prev_obj.t === 'num') {
+      lexer.set_pos(prev_obj.v);  // Repeat.
+    } else {
+      break;
+    }
+  }
+
+  if (num_objects !== total_num_xref_entries ||
+      num_objects !== xref_table.length) {
+    console.trace([num_objects, total_num_xref_entries, xref_table.length]);
+    throw 'Mismatch between xref table size and /Size.';
+  }
+
+  var root = dict_get(first_trailer_dict, '/Root');
+  if (root === undefined || root.t !== 'objref')
+    throw "Invalid /Root in trailer dictionary.";
+
+  /*
+  var body = [ ];
+  var objs = { };
+  while (!lexer.is_eof()) {
+    var obj = consume_object();
+    if (obj === null) break;  // EOF.
+    if (obj.t !== "obj") throw "Non-object object in body.";
+    body.push(obj);
+    var key = obj_key(obj);
+    if (key in objs) {
+      console.log("Duplicate key, update? " + key);
+    } else {
+      objs[obj_key(obj)] = obj.v.v;
+    }
+  }
+  */
 
   /*
   var root_obj = objs[obj_key(root)];
@@ -868,15 +965,6 @@ function PDFReader(raw) {
     console.log(contents);
     break;
   }
-  */
-
-  /*
-  console.log(raw.slice(rawp).toString('utf8'));
-  var last_xref_section_token = consume_token();
-  console.log(last_xref_section_token);
-  if (last_xref_section_token.t !== 'num') throw "xx";
-  console.log(consume_token_including_cmt_and_ws());
-  console.log(consume_token_including_cmt_and_ws());
   */
 
 }
