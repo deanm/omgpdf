@@ -870,3 +870,7 @@ function PDF(raw) {
   */
 
 }
+
+try {
+  exports.PDF = PDF;
+} catch(e) { }
