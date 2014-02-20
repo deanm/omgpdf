@@ -802,7 +802,7 @@ function PDF(raw) {
 
   if (lexer.consume_line() !== '') throw "xx";
   if (lexer.consume_line() !== 'startxref') throw "Expected startxref.";
-  var last_xref_section = parseInt(consume_line(), 10);
+  var last_xref_section = parseInt(lexer.consume_line(), 10);
   if (lexer.consume_line() !== '%%EOF') throw "Expected %%EOF.";
 
   if (dict_get(trailer_dict, '/Size').v !== total_num_xref_entries)
