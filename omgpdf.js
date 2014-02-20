@@ -540,14 +540,22 @@ function PDF(raw) {
         if (nextobj !== null && nextobj.t === "_stream") {
           var s = {v: {d: {v: objs, t: 'dict'}, s: nextobj.v}, t: 'stream'};
           var len_obj = dict_get(s.v.d, '/Length');
-          if (len_obj === undefined || len_obj.t !== 'num' ||
-              len_obj.v !== s.v.s.length) {
-            console.warn(
-                "Stream length doesn't match /Length in dictionary: " +
-                len_obj.v + " != " + s.v.s.length);
-            if (s.v.s.length > len_obj.v) {
-              console.warn('Trimming stream data to match /Length');
+          if (len_obj === undefined || len_obj.t !== 'num')
+            throw 'Invalid /Length in stream dictionary.';
+          if (len_obj.v !== s.v.s.length) {
+            // We don't properly handle EOL in the stream consumption, so we
+            // assume if we're off by 1 or 2 it's because of EOL markers.
+            if (s.v.s.length > len_obj.v && s.v.s.length - len_obj.v <= 2) {
+              if (s.v.s.length - len_obj.v == 2) {
+                if (s.v.s[len_obj.v] !== 13 || s.v.s[len_obj.v+1] !== 10)
+                  throw 'Invalid stream EOL.';
+              } else {
+                if (s.v.s[len_obj.v] !== 10) throw 'Invalid stream EOL.';
+              }
               s.v.s = s.v.s.slice(0, len_obj.v);
+            } else {
+              throw "Stream length doesn't match /Length in dictionary: " +
+                    len_obj.v + " != " + s.v.s.length;
             }
           }
           return s;
@@ -570,6 +578,14 @@ function PDF(raw) {
         if (lexer.cur_byte() !== 10)
           throw "Missing newline after stream keyword.";
         lexer.adv_byte();
+        // NOTE: This just takes everything up to 'endstream', without looking
+        // at the stream dictionary.  I suppose this is potentially dangerous,
+        // for example if it is allowed for the text 'endstream' to be
+        // contained within a stream body.  Additionally we don't handle EOL
+        // here, the spec says:
+        // "It is recommended that there be an end-of-line marker after the data
+        //  and before endstream; this marker is not included in the stream
+        //  length."
         var streamdata = lexer.consume_buffer_until_chars(kEndstream);
         return {v: streamdata, t: '_stream'};
       case 'endstream':
