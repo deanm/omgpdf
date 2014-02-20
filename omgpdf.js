@@ -1,6 +1,6 @@
 // (c) 2014 Dean McNamee (dean@gmail.com)
 
-var zlib = require('zlib');
+var pdfjsstream = require(__dirname + '/pdfjs-stream.js');
 
 function zero_pad(len, num) {
   var str = '' + num;
@@ -131,7 +131,7 @@ function PDFLZWOutputIndexStream(code_stream, code_length, p,
   return op;
 }
 
-function dict_has_key(dict, name) {
+function dict_has(dict, name) {
   var a = dict.v;
   for (var i = 1, il = a.length; i < il; i += 2) {
     if (a[i-1].v === name) return true;
@@ -145,6 +145,15 @@ function dict_get(dict, name) {
     if (a[i-1].v === name) return a[i];
   }
   return undefined;
+}
+
+function dict_get_value_checked(dict, name, typ) {
+  var v = dict_get(dict, name);
+  if (v === undefined)
+    throw 'Field not in dictionary: ' + name;
+  if (v.t !== typ)
+    throw 'Field has unexpected type: ' + v.t;
+  return v.v;
 }
 
 function dict_del(dict, name) {
@@ -766,16 +775,28 @@ function PDFReader(raw) {
     return obj.v.id + '_' + obj.v.gen;
   }
 
-  function process_stream(stream, callback) {
+  function filter_stream(stream) {
     if (stream.t !== 'stream') throw "Not a stream.";
     var filter = dict_get(stream.v.d, '/Filter');
     if (filter === undefined) return callback(stream, false, stream.v.s);
     if (filter.v === '/FlateDecode') {
-      //dict_del(stream.v.d, '/Filter');
-      zlib.inflate(stream.v.s, function(err, res) {
-        if (err !== null) throw err;
-        callback(stream, true, res);
-      });
+      var data = new Uint8Array(stream.v.s);
+      var s = new pdfjsstream.Stream(data);
+      var params_dict = dict_get(stream.v.d, '/DecodeParms');
+      var filter = null;
+      if (params_dict) {
+        var params = {
+          get: function(x) {
+            var v = dict_get(params_dict, '/' + x);
+            return v ? v.v : undefined;
+          },
+        };
+        filter = new pdfjsstream.PredictorStream(
+            new pdfjsstream.FlateStream(s), params);
+      } else {
+        filter = new pdfjsstream.FlateStream(s);
+      }
+      return filter.getBytes();
     } else if (filter.v === '/LZWDecode') {
       /*
       // How do we get the output buffer size right?
@@ -868,13 +889,81 @@ function PDFReader(raw) {
         // FIXME: gen ?
         if (pieces[2] === 'n') {
           if (first_object + i in xref_table) throw 'dup';  // FIXME updates.
-          xref_table[first_object + i] = offset;
+          xref_table[first_object + i] = {o: null, i: offset};
         } else {   // FIXME: Not sure
           //console.log(pieces);
         }
       }
       lexer.set_pos(end_of_section);  // Just to make sure we seeked properly.
     }
+  }
+
+  function process_xref_stream() {
+    var xref_stream_obj = consume_object();
+    if (!xref_stream_obj || xref_stream_obj.t !== 'obj')
+      throw "Expected xref stream object.";
+    var xref_stream = xref_stream_obj.v.v;
+    if (!xref_stream || xref_stream.t !== 'stream')
+      throw "Expected xref stream.";
+
+    trailer_dict = xref_stream.v.d;
+
+    if (dict_get_value_checked(trailer_dict, '/Type', 'name') !== '/XRef')
+      throw 'Invalid xref stream type.';
+
+    var size = dict_get_value_checked(trailer_dict, '/Size', 'num');
+
+    if (num_objects === null)  // Appears right to keep the first /Size.
+      num_objects = size;
+
+    var index = [0, size];
+    if (dict_has(trailer_dict, '/Index')) {
+      index = dict_get_value_checked(trailer_dict, '/Index', 'array');
+      index = index.map(function(x) { return x.v; });
+    }
+
+    var w_obj = dict_get(trailer_dict, '/W');
+    if (!w_obj || w_obj.t !== 'array' || w_obj.v.length !== 3)
+      throw 'Invalid /W entry.';
+    var ws0 = w_obj.v[0].v,
+        ws1 = w_obj.v[1].v,
+        ws2 = w_obj.v[2].v;
+
+    var xref_data = filter_stream(xref_stream);
+
+    var p = 0;
+    for (var i = 1, il = index.length; i < il; i += 2) {
+      var first_object = index[i-1];
+      var num_entries = index[i];
+      total_num_xref_entries += num_entries;
+      for (var j = 0; j < num_entries; ++j) {
+        var f0 = (ws0 === 0) ? 1: 0, f1 = 0, f2 = 0;
+        // TODO(deanm): Check xref_data bounds.
+        for (var w = 0; w < ws0; ++w) f0 = (f0 << 8) | xref_data[p++];
+        for (var w = 0; w < ws1; ++w) f1 = (f1 << 8) | xref_data[p++];
+        for (var w = 0; w < ws2; ++w) f2 = (f2 << 8) | xref_data[p++];
+
+        switch (f0) {
+          case 0:
+            // TODO Free objects... need to do anything?
+            break;
+          case 1:
+            if (first_object + j in xref_table) throw 'dup';  // FIXME updates.
+            xref_table[first_object + j] = {o: null, i: f1};
+            // TODO gen?
+            if (f2 !== 0) throw "Do something with gen...";
+            break;
+          case 2:
+            if (first_object + j in xref_table) throw 'dup';  // FIXME updates.
+            xref_table[first_object + j] = {o: f1, i: f2};
+            break;
+          default:
+            throw 'Invalid xref type.';
+        }
+      }
+    }
+
+    if (first_trailer_dict === null) first_trailer_dict = trailer_dict;
   }
 
   // First check the header at the beginning of the file.
@@ -911,11 +1000,16 @@ function PDFReader(raw) {
 
   while (true) {
     // console.log('Processing table at: ' + lexer.cur_pos());
-    if (lexer.consume_line() !== "xref") throw "Expected xref table.";
-    process_xref_table();
-    if (lexer.consume_line_bw() !== 'trailer') throw 'Expected trailer.';
-    process_trailer();
-    
+    var savepos = lexer.cur_pos();
+    if (lexer.consume_line() === "xref") {  // Normwal xref table.
+      process_xref_table();
+      if (lexer.consume_line_bw() !== 'trailer') throw 'Expected trailer.';
+      process_trailer();
+    } else {  // Rewind and try to process it as a xref stream.
+      lexer.set_pos(savepos);
+      process_xref_stream();
+    }
+
     var prev_obj = dict_get(trailer_dict, '/Prev');
     if (prev_obj && prev_obj.t === 'num') {
       lexer.set_pos(prev_obj.v);  // Repeat.
