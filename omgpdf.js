@@ -131,6 +131,33 @@ function PDFLZWOutputIndexStream(code_stream, code_length, p,
   return op;
 }
 
+function dict_has_key(dict, name) {
+  var a = dict.v;
+  for (var i = 1, il = a.length; i < il; i += 2) {
+    if (a[i-1].v === name) return true;
+  }
+  return false;
+}
+
+function dict_get(dict, name) {
+  var a = dict.v;
+  for (var i = 1, il = a.length; i < il; i += 2) {
+    if (a[i-1].v === name) return a[i];
+  }
+  return undefined;
+}
+
+function dict_del(dict, name) {
+  var a = dict.v;
+  for (var i = 1, il = a.length; i < il; i += 2) {
+    if (a[i-1].v === name) {
+      a.splice(i-1, 2);
+      return true;
+    }
+  }
+  return false;
+}
+
 function PDF(raw) {
   var rawl = raw.length;
   var rawp = 0;
@@ -655,33 +682,6 @@ function PDF(raw) {
     bufp = emit_string_line(buf, bufp, offset_to_xrefs + '');
     bufp = emit_string_line(buf, bufp, '%%EOF');
     return bufp;
-  }
-
-  function dict_has_key(dict, name) {
-    var a = dict.v;
-    for (var i = 1, il = a.length; i < il; i += 2) {
-      if (a[i-1].v === name) return true;
-    }
-    return false;
-  }
-
-  function dict_get(dict, name) {
-    var a = dict.v;
-    for (var i = 1, il = a.length; i < il; i += 2) {
-      if (a[i-1].v === name) return a[i];
-    }
-    return undefined;
-  }
-
-  function dict_del(dict, name) {
-    var a = dict.v;
-    for (var i = 1, il = a.length; i < il; i += 2) {
-      if (a[i-1].v === name) {
-        a.splice(i-1, 2);
-        return true;
-      }
-    }
-    return false;
   }
 
   function obj_key(obj) {
