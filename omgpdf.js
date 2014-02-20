@@ -158,6 +158,54 @@ function dict_del(dict, name) {
   return false;
 }
 
+
+function PDFParser(buf) {
+  var bufp = 0;
+  var buflen = buf.length;
+
+  this.cur_pos = function() { return bufp; };
+
+  function ascii_substr(start, end) {
+    return buf.toString('ascii', start, end);
+  }
+
+  // From the spec:
+  //   "As a matter of convention, the tokens in a PDF file are arranged into
+  //    lines; see Section 3.1, “Lexical Conventions.” Each line is terminated
+  //    by an end-of-line (EOL) marker, which may be a carriage return
+  //    (character code 13), a line feed (character code 10), or both."
+  //   "The carriage return (CR) and line feed (LF) characters, also called
+  //    newline characters, are treated as end-of-line (EOL) markers. The
+  //    combination of a carriage return followed immediately by a line feed is
+  //    treated as one EOL marker."
+  this.consume_line = function() {
+    var startp = bufp;
+    // Seek to \r or \n.
+    while (bufp < buflen && buf[bufp] !== 10 && buf[bufp] !== 13)
+      ++bufp;
+    var endp = bufp;
+    // Seek past \r\n|\r|\n.
+    bufp += (bufp+1 < buflen && buf[bufp] === 13 && buf[bufp+1] === 10) ? 2 : 1;
+    return ascii_substr(startp, endp);
+  };
+
+  this.consume_line_bw = function() {
+    --bufp;  // Cursor points after.
+    // Seek past \r\n|\r|\n.
+    bufp -= (bufp >= 1 && buf[bufp-1] === 13 && buf[bufp] === 10) ? 2 : 1;
+    var endp = bufp + 1;
+    // Seek to \r or \n.
+    while (bufp >= 0 && buf[bufp] !== 10 && buf[bufp] !== 13)
+      --bufp;
+    bufp++;  // This is a bit fiddly, probably better to peek one before above?
+    return ascii_substr(bufp, endp);
+  };
+}
+
+function seek_eol(buf, bufp) {
+  
+}
+
 function PDF(raw) {
   var rawl = raw.length;
   var rawp = 0;
@@ -177,6 +225,14 @@ function PDF(raw) {
     while (rawp < rawl && raw[rawp++] !== 10); /* \n */
     var endp = rawp-1;
     if (raw[endp-1] === 13) --endp; /* \r */
+    return raw_substr(startp, endp);
+  }
+
+  function consume_line_bw() {
+    var startp = rawp - 1;  // backwards pointer, points byte after.
+    if (raw[startp] === 13) --endp; /* \r */
+    while (rawp >= 0 && raw[rawp--] !== 10); /* \n */
+    var endp = rawp-1;
     return raw_substr(startp, endp);
   }
 
