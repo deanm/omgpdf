@@ -13,7 +13,7 @@ function assert_eq(a, b) {
 }
 
 function test_eol() {
-  var p = new PDFParser(new Buffer('boc\r\nboc\r\r\nboc\nboc\rboc\r\n'));
+  var p = new PDFLexer(new Buffer('boc\r\nboc\r\r\nboc\nboc\rboc\r\n'));
   // Forwards.
   assert_eq(0, p.cur_pos());
   assert_eq("boc", p.consume_line());

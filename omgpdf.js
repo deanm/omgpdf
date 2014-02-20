@@ -159,11 +159,16 @@ function dict_del(dict, name) {
 }
 
 
-function PDFParser(buf) {
+function PDFLexer(buf) {
   var bufp = 0;
   var buflen = buf.length;
 
   this.cur_pos = function() { return bufp; };
+  this.set_pos = function(p) { return bufp = p; };
+  this.is_eof = function() { return bufp >= buflen; };
+  this.cur_byte = function() { return buf[bufp]; }
+  this.adv_byte = function() { bufp++; };
+  this.adv_bytes = function(n) { bufp += n; };
 
   function ascii_substr(start, end) {
     return buf.toString('ascii', start, end);
@@ -200,48 +205,20 @@ function PDFParser(buf) {
     bufp++;  // This is a bit fiddly, probably better to peek one before above?
     return ascii_substr(bufp, endp);
   };
-}
 
-function seek_eol(buf, bufp) {
-  
-}
-
-function PDF(raw) {
-  var rawl = raw.length;
-  var rawp = 0;
-
-  function raw_substr(a, b) {
-    return raw.toString('ascii', a, b);
+  function consume_string_until_char(c) {
+    var startp = bufp;
+    while (bufp < buflen && buf[bufp++] !== c);
+    return ascii_substr(startp, bufp-1);
   }
 
-  function consume_string_from_pos_until_endbyte(startp, endbyte) {
-    rawp = startp;
-    while (rawp < rawl && raw[rawp++] !== endbyte);
-    return raw_substr(startp, rawp-1);
-  }
-
-  function consume_line() {
-    var startp = rawp;
-    while (rawp < rawl && raw[rawp++] !== 10); /* \n */
-    var endp = rawp-1;
-    if (raw[endp-1] === 13) --endp; /* \r */
-    return raw_substr(startp, endp);
-  }
-
-  function consume_line_bw() {
-    var startp = rawp - 1;  // backwards pointer, points byte after.
-    if (raw[startp] === 13) --endp; /* \r */
-    while (rawp >= 0 && raw[rawp--] !== 10); /* \n */
-    var endp = rawp-1;
-    return raw_substr(startp, endp);
-  }
-
-  function consume_buffer_until_endbytes(startp, endbytes) {
-    rawp = startp;
-    for (; rawp < rawl; ++rawp) {
+  this.consume_buffer_until_chars = function(chars) {
+    var startp = bufp;
+    var charslen = chars.length;
+    for (; bufp+charslen < buflen; ++bufp) {
       var end = true;
-      for (var i = 0, il = endbytes.length; i < il; ++i) {
-        if (raw[rawp + i] !== endbytes[i]) {
+      for (var i = 0; i < charslen; ++i) {
+        if (buf[bufp + i] !== chars[i]) {
           end = false;
           break;
         }
@@ -249,154 +226,145 @@ function PDF(raw) {
       if (end === true) break;
     }
 
-    var data = raw.slice(startp, rawp);
-    rawp += endbytes.length;
+    var data = buf.slice(startp, bufp);
+    bufp += chars.length;
     return data;
-  }
+  };
 
-  var header = consume_line();
-
-  function consume_token() {
-    while (true) {
-      var token = consume_token_including_cmt_and_ws();
-      if (token.t !== 'ws' && token.t !== 'cmt') return token;
-    }
-  }
-
-  function consume_token_including_cmt_and_ws() {
-    var startp = rawp;
+  this.consume_token_including_cmt_and_ws = function() {
+    var startp = bufp;
 
     // 3.2.1 - Boolean Objects.
-    if (raw[rawp+0] === 116 &&  /* t */
-        raw[rawp+1] === 114 &&  /* r */
-        raw[rawp+2] === 117 &&  /* u */
-        raw[rawp+3] === 101) {  /* e */
-      rawp += 4;
-      return {v: true, t: 'bool', s: startp, e: rawp};
+    if (buf[bufp+0] === 116 &&  /* t */
+        buf[bufp+1] === 114 &&  /* r */
+        buf[bufp+2] === 117 &&  /* u */
+        buf[bufp+3] === 101) {  /* e */
+      bufp += 4;
+      return {v: true, t: 'bool', s: startp, e: bufp};
     }
-    if (raw[rawp+0] === 102 &&  /* f */
-        raw[rawp+1] ===  97 &&  /* a */
-        raw[rawp+2] === 108 &&  /* l */
-        raw[rawp+3] === 115 &&  /* s */
-        raw[rawp+4] === 101) {  /* e */
-      rawp += 5;
-      return {v: false, t: 'bool', s: startp, e: rawp};
+    if (buf[bufp+0] === 102 &&  /* f */
+        buf[bufp+1] ===  97 &&  /* a */
+        buf[bufp+2] === 108 &&  /* l */
+        buf[bufp+3] === 115 &&  /* s */
+        buf[bufp+4] === 101) {  /* e */
+      bufp += 5;
+      return {v: false, t: 'bool', s: startp, e: bufp};
     }
 
     // 3.2.7 - Stream Objects.
-    if (raw[rawp+0] === 115 &&  /* s */
-        raw[rawp+1] === 116 &&  /* t */
-        raw[rawp+2] === 114 &&  /* r */
-        raw[rawp+3] === 101 &&  /* e */
-        raw[rawp+4] ===  97 &&  /* a */
-        raw[rawp+5] === 109) {  /* m */
-      rawp += 6;
-      return {v: false, t: 'stream', s: startp, e: rawp};
+    if (buf[bufp+0] === 115 &&  /* s */
+        buf[bufp+1] === 116 &&  /* t */
+        buf[bufp+2] === 114 &&  /* r */
+        buf[bufp+3] === 101 &&  /* e */
+        buf[bufp+4] ===  97 &&  /* a */
+        buf[bufp+5] === 109) {  /* m */
+      bufp += 6;
+      return {v: false, t: 'stream', s: startp, e: bufp};
     }
-    if (raw[rawp+0] === 101 &&  /* e */
-        raw[rawp+1] === 110 &&  /* n */
-        raw[rawp+2] === 100 &&  /* d */
-        raw[rawp+3] === 115 &&  /* s */
-        raw[rawp+4] === 116 &&  /* t */
-        raw[rawp+5] === 114 &&  /* r */
-        raw[rawp+6] === 101 &&  /* e */
-        raw[rawp+7] ===  97 &&  /* a */
-        raw[rawp+8] === 109) {  /* m */
-      rawp += 9;
-      return {v: false, t: 'endstream', s: startp, e: rawp};
+    if (buf[bufp+0] === 101 &&  /* e */
+        buf[bufp+1] === 110 &&  /* n */
+        buf[bufp+2] === 100 &&  /* d */
+        buf[bufp+3] === 115 &&  /* s */
+        buf[bufp+4] === 116 &&  /* t */
+        buf[bufp+5] === 114 &&  /* r */
+        buf[bufp+6] === 101 &&  /* e */
+        buf[bufp+7] ===  97 &&  /* a */
+        buf[bufp+8] === 109) {  /* m */
+      bufp += 9;
+      return {v: false, t: 'endstream', s: startp, e: bufp};
     }
 
     // 3.2.8 - Null Object.
-    if (raw[rawp+0] === 110 &&  /* n */
-        raw[rawp+1] === 117 &&  /* u */
-        raw[rawp+2] === 108 &&  /* l */
-        raw[rawp+3] === 108) {  /* l */
-      rawp += 4;
-      return {v: null, t: 'null', s: startp, e: rawp};
+    if (buf[bufp+0] === 110 &&  /* n */
+        buf[bufp+1] === 117 &&  /* u */
+        buf[bufp+2] === 108 &&  /* l */
+        buf[bufp+3] === 108) {  /* l */
+      bufp += 4;
+      return {v: null, t: 'null', s: startp, e: bufp};
     }
 
     // 3.2.9 - Indirect Objects.
-    if (raw[rawp+0] === 111 &&  /* o */
-        raw[rawp+1] ===  98 &&  /* b */
-        raw[rawp+2] === 106) {  /* j */
-      rawp += 3;
-      return {v: false, t: 'obj', s: startp, e: rawp};
+    if (buf[bufp+0] === 111 &&  /* o */
+        buf[bufp+1] ===  98 &&  /* b */
+        buf[bufp+2] === 106) {  /* j */
+      bufp += 3;
+      return {v: false, t: 'obj', s: startp, e: bufp};
     }
-    if (raw[rawp+0] === 101 &&  /* e */
-        raw[rawp+1] === 110 &&  /* n */
-        raw[rawp+2] === 100 &&  /* d */
-        raw[rawp+3] === 111 &&  /* o */
-        raw[rawp+4] ===  98 &&  /* b */
-        raw[rawp+5] === 106) {  /* j */
-      rawp += 6;
-      return {v: false, t: 'endobj', s: startp, e: rawp};
-    }
-
-    if (raw[rawp+0] === 120 &&  /* x */
-        raw[rawp+1] === 114 &&  /* r */
-        raw[rawp+2] === 101 &&  /* e */
-        raw[rawp+3] === 102) {  /* f */
-      rawp += 4;
-      return {v: null, t: 'xref', s: startp, e: rawp};
+    if (buf[bufp+0] === 101 &&  /* e */
+        buf[bufp+1] === 110 &&  /* n */
+        buf[bufp+2] === 100 &&  /* d */
+        buf[bufp+3] === 111 &&  /* o */
+        buf[bufp+4] ===  98 &&  /* b */
+        buf[bufp+5] === 106) {  /* j */
+      bufp += 6;
+      return {v: false, t: 'endobj', s: startp, e: bufp};
     }
 
-    if (raw[rawp+0] === 115 &&  /* s */
-        raw[rawp+1] === 116 &&  /* t */
-        raw[rawp+2] ===  97 &&  /* a */
-        raw[rawp+3] === 114 &&  /* r */
-        raw[rawp+4] === 116 &&  /* t */
-        raw[rawp+5] === 120 &&  /* x */
-        raw[rawp+6] === 114 &&  /* r */
-        raw[rawp+7] === 101 &&  /* e */
-        raw[rawp+8] === 102) {  /* f */
-      rawp += 9;
-      return {v: null, t: 'startxref', s: startp, e: rawp};
+    if (buf[bufp+0] === 120 &&  /* x */
+        buf[bufp+1] === 114 &&  /* r */
+        buf[bufp+2] === 101 &&  /* e */
+        buf[bufp+3] === 102) {  /* f */
+      bufp += 4;
+      return {v: null, t: 'xref', s: startp, e: bufp};
+    }
+
+    if (buf[bufp+0] === 115 &&  /* s */
+        buf[bufp+1] === 116 &&  /* t */
+        buf[bufp+2] ===  97 &&  /* a */
+        buf[bufp+3] === 114 &&  /* r */
+        buf[bufp+4] === 116 &&  /* t */
+        buf[bufp+5] === 120 &&  /* x */
+        buf[bufp+6] === 114 &&  /* r */
+        buf[bufp+7] === 101 &&  /* e */
+        buf[bufp+8] === 102) {  /* f */
+      bufp += 9;
+      return {v: null, t: 'startxref', s: startp, e: bufp};
     }
 
     // "The delimiter characters (, ), <, >, [, ], {, }, /, and % are special."
-    switch (raw[rawp]) {
+    switch (buf[bufp]) {
       // Whitespace.
       case 0: case 9: case 10: case 12: case 13: case 32:
         do {
-          ++rawp;
-        } while (raw[rawp] ===  0 || raw[rawp] ===  9 || raw[rawp] === 10 ||
-                 raw[rawp] === 12 || raw[rawp] === 13 || raw[rawp] === 32);
-        return {v: null, t: 'ws', s: startp, e: rawp};
+          ++bufp;
+        } while (buf[bufp] ===  0 || buf[bufp] ===  9 || buf[bufp] === 10 ||
+                 buf[bufp] === 12 || buf[bufp] === 13 || buf[bufp] === 32);
+        return {v: null, t: 'ws', s: startp, e: bufp};
       // Comments.
       case 37: /* % */
-        while (raw[rawp] !== 10) ++rawp;  // Seek on newline.
-        return {v: null, t: 'cmt', s: startp, e: rawp};
+        while (buf[bufp] !== 10) ++bufp;  // Seek on newline.
+        return {v: null, t: 'cmt', s: startp, e: bufp};
       // 3.2.2 - Numeric Objects.
       case 48:  /* 0 */ case 49:  /* 1 */ case 50:  /* 2 */ case 51:  /* 3 */
       case 52:  /* 4 */ case 53:  /* 5 */ case 54:  /* 6 */ case 55:  /* 7 */
       case 56:  /* 8 */ case 57:  /* 9 */ case 46:  /* . */ case 45:  /* - */
       case 43:  /* + */
-        while (raw[rawp] === 48 ||  /* 0 */
-               raw[rawp] === 49 ||  /* 1 */
-               raw[rawp] === 50 ||  /* 2 */
-               raw[rawp] === 51 ||  /* 3 */
-               raw[rawp] === 52 ||  /* 4 */
-               raw[rawp] === 53 ||  /* 5 */
-               raw[rawp] === 54 ||  /* 6 */
-               raw[rawp] === 55 ||  /* 7 */
-               raw[rawp] === 56 ||  /* 8 */
-               raw[rawp] === 57 ||  /* 9 */
-               raw[rawp] === 46 ||  /* . */
-               raw[rawp] === 45 ||  /* - */
-               raw[rawp] === 43) {  /* + */
-            ++rawp;
+        while (buf[bufp] === 48 ||  /* 0 */
+               buf[bufp] === 49 ||  /* 1 */
+               buf[bufp] === 50 ||  /* 2 */
+               buf[bufp] === 51 ||  /* 3 */
+               buf[bufp] === 52 ||  /* 4 */
+               buf[bufp] === 53 ||  /* 5 */
+               buf[bufp] === 54 ||  /* 6 */
+               buf[bufp] === 55 ||  /* 7 */
+               buf[bufp] === 56 ||  /* 8 */
+               buf[bufp] === 57 ||  /* 9 */
+               buf[bufp] === 46 ||  /* . */
+               buf[bufp] === 45 ||  /* - */
+               buf[bufp] === 43) {  /* + */
+            ++bufp;
           }
-          var str = raw.slice(startp, rawp).toString('ascii');
+          var str = buf.slice(startp, bufp).toString('ascii');
           return {v: parseFloat(str),
-                  t: 'num', s: startp, e: rawp};
+                  t: 'num', s: startp, e: bufp};
       // 3.2.3 - String Objects.
       case 40:  /* ( */
         var chars = [ ];
-        while (rawp < rawl) {
-          ++rawp;
-          if (raw[rawp] === 92) { /* \ */
-            ++rawp;
-            switch (raw[rawp]) {
+        while (bufp < buflen) {
+          ++bufp;
+          if (buf[bufp] === 92) { /* \ */
+            ++bufp;
+            switch (buf[bufp]) {
               case 110:  /* n */  chars.push("\n"); break;
               case 114:  /* r */  chars.push("\r"); break;
               case 116:  /* t */  chars.push("\t"); break;
@@ -408,19 +376,19 @@ function PDF(raw) {
               case  48:  /* 0 */ case  49:  /* 1 */
               case  50:  /* 2 */ case  51:  /* 3 */
                 chars.push(String.fromCharCode(
-                    parseInt(raw.slice(rawp, rawp+3).toString(ascii), 8)));
+                    parseInt(buf.slice(bufp, bufp+3).toString(ascii), 8)));
                 break;
               default:
-                --rawp; break;
+                --bufp; break;
             }
-          } else if (raw[rawp] === 41) {  /* ) */
-            ++rawp;
+          } else if (buf[bufp] === 41) {  /* ) */
+            ++bufp;
             break;
           } else {
-            chars.push(String.fromCharCode(raw[rawp]));
+            chars.push(String.fromCharCode(buf[bufp]));
           }
         }
-        return {v: chars.join(''), t: 'str', s: startp, e: rawp};
+        return {v: chars.join(''), t: 'str', s: startp, e: bufp};
       // 3.2.4 - Name Objects.
       case 47: /* / */
         // "The name may include any regular characters, but not delimiter or
@@ -428,64 +396,75 @@ function PDF(raw) {
         // "Note: The token / (a slash followed by no regular characters) is a
         //  valid name."
         while (true) {
-          ++rawp;
-          if (raw[rawp] ===   0 ||  /* \000 */
-              raw[rawp] ===   9 ||  /* \t */
-              raw[rawp] ===  10 ||  /* \n */
-              raw[rawp] ===  12 ||  /* \f */
-              raw[rawp] ===  13 ||  /* \r */
-              raw[rawp] ===  32 ||  /*   */
-              raw[rawp] ===  40 ||  /* ( */
-              raw[rawp] ===  41 ||  /* ) */
-              raw[rawp] ===  60 ||  /* < */
-              raw[rawp] ===  62 ||  /* > */
-              raw[rawp] ===  91 ||  /* [ */
-              raw[rawp] ===  93 ||  /* ] */
-              raw[rawp] === 123 ||  /* { */
-              raw[rawp] === 125 ||  /* } */
-              raw[rawp] ===  47 ||  /* / */
-              raw[rawp] ===  37) {  /* % */
+          ++bufp;
+          if (buf[bufp] ===   0 ||  /* \000 */
+              buf[bufp] ===   9 ||  /* \t */
+              buf[bufp] ===  10 ||  /* \n */
+              buf[bufp] ===  12 ||  /* \f */
+              buf[bufp] ===  13 ||  /* \r */
+              buf[bufp] ===  32 ||  /*   */
+              buf[bufp] ===  40 ||  /* ( */
+              buf[bufp] ===  41 ||  /* ) */
+              buf[bufp] ===  60 ||  /* < */
+              buf[bufp] ===  62 ||  /* > */
+              buf[bufp] ===  91 ||  /* [ */
+              buf[bufp] ===  93 ||  /* ] */
+              buf[bufp] === 123 ||  /* { */
+              buf[bufp] === 125 ||  /* } */
+              buf[bufp] ===  47 ||  /* / */
+              buf[bufp] ===  37) {  /* % */
             break;
           }
         }
-        return {v: raw.slice(startp, rawp).toString('ascii'), t: 'name',
-                s: startp, e: rawp};
+        return {v: buf.slice(startp, bufp).toString('ascii'), t: 'name',
+                s: startp, e: bufp};
       // 3.2.5 - Array Objects.
       case 91: /* [ */
-        ++rawp;
-        return {v: null, t: '[', s: startp, e: rawp};
+        ++bufp;
+        return {v: null, t: '[', s: startp, e: bufp};
       case 93: /* ] */
-        ++rawp;
-        return {v: null, t: ']', s: startp, e: rawp};
+        ++bufp;
+        return {v: null, t: ']', s: startp, e: bufp};
       // 3.2.6 - Dictionary Objects.
       // 3.2.3 - String Objects (Hexadecimal Strings).
       case 60:  /* < */
-        ++rawp;
-        if (raw[rawp] === 60) {
-          ++rawp;
-          return {v: null, t: '<<', s: startp, e: rawp};
+        ++bufp;
+        if (buf[bufp] === 60) {
+          ++bufp;
+          return {v: null, t: '<<', s: startp, e: bufp};
         } else {
-          var str = consume_string_from_pos_until_endbyte(startp + 1, 62);
+          bufp = startp + 1;
+          var str = consume_string_until_char(62);
           if (str.length & 1) throw "Odd number of characters in hex string";
-          return {v: str, t: 'hexstr', s: startp, e: rawp};
+          return {v: str, t: 'hexstr', s: startp, e: bufp};
         }
       case 62:  /* > */
-        if (raw[rawp+1] !== 62) throw "Unexpected single > in lexer."
-        rawp += 2;
-          return {v: null, t: '>>', s: startp, e: rawp};
+        if (buf[bufp+1] !== 62) throw "Unexpected single > in lexer."
+        bufp += 2;
+          return {v: null, t: '>>', s: startp, e: bufp};
       // 3.2.9 - Indirect Objects.
       case 82:  /* R */
-        ++rawp;
-        return {v: false, t: 'objref', s: startp, e: rawp};
+        ++bufp;
+        return {v: false, t: 'objref', s: startp, e: bufp};
       default:
-        throw "Lexer: " + raw[rawp];
+        throw "Lexer: " + buf[bufp];
     }
-  }
+  };
+
+  this.consume_token = function() {
+    while (true) {
+      var token = this.consume_token_including_cmt_and_ws();
+      if (token.t !== 'ws' && token.t !== 'cmt') return token;
+    }
+  };
+}
+
+function PDF(raw) {
+  var lexer = new PDFLexer(raw);
+  var header = lexer.consume_line();
 
   function consume_objectish() {
-    var startp = rawp;
-
-    var token = consume_token();
+    var token = lexer.consume_token();
     switch (token.t) {
       // 3.2.1 - Boolean Objects.
       case 'bool':
@@ -493,11 +472,11 @@ function PDF(raw) {
       // 3.2.2 - Numeric Objects.
       case 'num':
         // 3.2.9 - Indirect Objects.
-        var savep = rawp;
+        var savepos = lexer.cur_pos();
         var type = 'num';
         var peeked = [ ];
         for (var i = 0; i < 2; ++i) {
-          var peek = consume_token();
+          var peek = lexer.consume_token();
           if (i === 0 && peek.t !== 'num') break;
           if (i === 1) {
             if (peek.t === 'obj' || peek.t === 'objref') type = peek.t;
@@ -506,7 +485,7 @@ function PDF(raw) {
         }
 
         if (type === 'num') {
-          rawp = savep;
+          lexer.set_pos(savepos);
           return {v: token.v, t: 'num'};
         }
 
@@ -517,7 +496,8 @@ function PDF(raw) {
           return {v: {id: obj_id, gen: obj_gen}, t: 'objref'};
 
         var inner_obj = consume_object();
-        if (consume_object().t !== '_endobj') throw "Unable to find endobj.";
+        if (consume_object().t !== '_endobj')
+          throw "Unable to find endobj.";
         return {v: {id: obj_id, gen: obj_gen, v: inner_obj}, t: 'obj'};
       // 3.2.3 - String Objects.
       case 'str':
@@ -552,7 +532,7 @@ function PDF(raw) {
 
         if (objs.length & 1) throw "Dictionary has odd number of elements.";
 
-        var savep = rawp;
+        var savepos = lexer.cur_pos();
         var nextobj = consume_object();
         if (nextobj !== null && nextobj.t === "_stream") {
           var s = {v: {d: {v: objs, t: 'dict'}, s: nextobj.v}, t: 'stream'};
@@ -567,10 +547,10 @@ function PDF(raw) {
               s.v.s = s.v.s.slice(0, len_obj.v);
             }
           }
-          return s
+          return s;
         }
 
-        rawp = savep;
+        lexer.set_pos(savepos);
         return {v: objs, t: 'dict'};
       case '>>':
         return {v: null, t: '_>>'};
@@ -583,9 +563,11 @@ function PDF(raw) {
         //  return and a line feed or just a line feed, and not by a carriage
         //  return alone."
         // Seek past \r?\n.
-        if (raw[rawp] === 13) ++rawp;
-        if (raw[rawp++] !== 10) throw "Missing newline after stream keyword.";
-        var streamdata = consume_buffer_until_endbytes(rawp, kEndstream);
+        if (lexer.cur_byte() === 13) lexer.adv_byte();
+        if (lexer.cur_byte() !== 10)
+          throw "Missing newline after stream keyword.";
+        lexer.adv_byte();
+        var streamdata = lexer.consume_buffer_until_chars(kEndstream);
         return {v: streamdata, t: '_stream'};
       case 'endstream':
         throw "Unexpected endstream";
@@ -607,7 +589,7 @@ function PDF(raw) {
 
   function consume_object() {
     var obj = undefined;
-    while (rawp < rawl && obj === undefined) obj = consume_objectish();
+    while (!lexer.is_eof() && obj === undefined) obj = consume_objectish();
     return obj;
   }
 
@@ -788,7 +770,7 @@ function PDF(raw) {
 
   var body = [ ];
   var objs = { };
-  while (rawp < rawl) {
+  while (!lexer.is_eof()) {
     var obj = consume_object();
     if (obj === null) break;  // EOF.
     if (obj.t !== "obj") throw "Non-object object in body.";
@@ -802,23 +784,23 @@ function PDF(raw) {
 
   var total_num_xref_entries = 0;
   while (true) {
-    var line = consume_line();
+    var line = lexer.consume_line();
     if (line.length === 0) continue;
     if (line === 'trailer') break;
     var pieces = line.split(' ');
     var first_object = parseInt(pieces[0]), num_entries = parseInt(pieces[1]);
     // each entry is 20 bytes long, including the new line.
     total_num_xref_entries += num_entries;
-    rawp += num_entries * 20;
+    lexer.adv_bytes(num_entries * 20);
   }
 
   var trailer_dict = consume_object();
   //console.log(trailer_dict);
 
-  if (consume_line() !== '') throw "xx";
-  if (consume_line() !== 'startxref') throw "Expected startxref.";
+  if (lexer.consume_line() !== '') throw "xx";
+  if (lexer.consume_line() !== 'startxref') throw "Expected startxref.";
   var last_xref_section = parseInt(consume_line(), 10);
-  if (consume_line() !== '%%EOF') throw "Expected %%EOF.";
+  if (lexer.consume_line() !== '%%EOF') throw "Expected %%EOF.";
 
   if (dict_get(trailer_dict, '/Size').v !== total_num_xref_entries)
     throw "/Size doesn't match number of xref entries.";
@@ -879,4 +861,4 @@ function PDF(raw) {
 
 try {
   exports.PDF = PDF;
-} catch(e) { }
+} catch(e) { };
