@@ -43,4 +43,15 @@ function test_eol() {
   assert_eq(0, p.cur_pos());
 }
 
+function test_string_literals() {
+  var strs = ['(yo yo)', '(yo(yo))', '(oo(())(()))'];
+  var p = new PDFLexer(new Buffer(strs.join('')));
+  for (var i = 0, il = strs.length; i < il; ++i) {
+    var t = p.consume_token();
+    assert_eq('str', t.t);
+    assert_eq(strs[i].substr(1, strs[i].length - 2), t.v);
+  }
+}
+
 test_eol();
+test_string_literals();
