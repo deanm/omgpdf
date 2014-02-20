@@ -761,7 +761,7 @@ function PDF(raw) {
     throw "Improper root.";
 
   this.process_streams = function(modifier, done) {
-    var inflight = 1;  // Guard against sync/async.
+    var inflight = 1;  // "retain" guard against sync/async.
     for (var i = 0, il = body.length; i < il; ++i) {
       var obj = body[i];
       if (obj.t !== 'obj') throw "Non-object body object.";
@@ -780,7 +780,7 @@ function PDF(raw) {
         }
       });
     }
-    if (--inflight === 0) done();  // Guard again sycn/async.
+    if (--inflight === 0) done();  // "release" guard again sync/async.
   }
 
   /*
