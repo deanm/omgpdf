@@ -19,6 +19,8 @@
 
 'use strict';
 
+var EOF = -1;
+
 var Stream = (function StreamClosure() {
   function Stream(arrayBuffer, start, length, dict) {
     this.bytes = arrayBuffer instanceof Uint8Array ? arrayBuffer :
