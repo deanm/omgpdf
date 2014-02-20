@@ -658,6 +658,11 @@ function PDF(raw) {
   }
 
   function dict_has_key(dict, name) {
+    var a = dict.v;
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].v === name) return true;
+    }
+    return false;
   }
 
   function dict_get(dict, name) {
