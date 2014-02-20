@@ -559,7 +559,13 @@ function PDF(raw) {
           var len_obj = dict_get(s.v.d, '/Length');
           if (len_obj === undefined || len_obj.t !== 'num' ||
               len_obj.v !== s.v.s.length) {
-            throw "Stream length doesn't match /Length in dictionary.";
+            console.warn(
+                "Stream length doesn't match /Length in dictionary: " +
+                len_obj.v + " != " + s.v.s.length);
+            if (s.v.s.length > len_obj.v) {
+              console.warn('Trimming stream data to match /Length');
+              s.v.s = s.v.s.slice(0, len_obj.v);
+            }
           }
           return s
         }
