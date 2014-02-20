@@ -360,6 +360,7 @@ function PDFLexer(buf) {
       // 3.2.3 - String Objects.
       case 40:  /* ( */
         var chars = [ ];
+        var nest = 0;  // Literal strings support "balanced paranthesis".
         while (bufp < buflen) {
           ++bufp;
           if (buf[bufp] === 92) { /* \ */
@@ -381,10 +382,12 @@ function PDFLexer(buf) {
               default:
                 --bufp; break;
             }
-          } else if (buf[bufp] === 41) {  /* ) */
+          } else if (buf[bufp] === 41 && nest === 0) {  /* ) */
             ++bufp;
             break;
           } else {
+            if (buf[bufp] === 40) ++nest;  /* ( */
+            if (buf[bufp] === 41) --nest;  /* ) */
             chars.push(String.fromCharCode(buf[bufp]));
           }
         }
