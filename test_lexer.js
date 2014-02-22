@@ -51,6 +51,11 @@ function test_string_literals() {
     assert_eq('str', t.t);
     assert_eq(strs[i].substr(1, strs[i].length - 2), t.v);
   }
+
+  p = new PDFLexer(new Buffer("(blah \\063\\173 blah)"));
+  var t = p.consume_token();
+  assert_eq('str', t.t);
+  assert_eq("blah 3{ blah", t.v);
 }
 
 test_eol();

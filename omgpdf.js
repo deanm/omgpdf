@@ -398,7 +398,8 @@ function PDFLexer(buf) {
               case  48:  /* 0 */ case  49:  /* 1 */
               case  50:  /* 2 */ case  51:  /* 3 */
                 chars.push(String.fromCharCode(
-                    parseInt(buf.slice(bufp, bufp+3).toString(ascii), 8)));
+                    parseInt(ascii_substr(bufp, bufp+3), 8)));
+                bufp += 2;
                 break;
               default:
                 --bufp; break;
