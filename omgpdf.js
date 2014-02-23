@@ -8,7 +8,6 @@ function zero_pad(len, num) {
          str = Array.prototype.join.call({length: len-str.length+1}, '0') + str;
 }
 
-/*
 function obj_type(o) {
   switch (typeof(o)) {
     case 'boolean':
@@ -31,6 +30,7 @@ function obj_type(o) {
   return null;
 }
 
+/*
 function obj_is_type(o, typ) {
   switch (typ) {
     case 'bool':   return typeof(o) === 'boolean';
@@ -480,60 +480,93 @@ function PDFLexer(buf) {
 }
 
 function PDFWriter(buf) {
+  var bufp = 0;
 
-  function emit_string(buf, bufp, str) {
+  function emit_string_hexliteral(str) {
+    buf[bufp++] = 60;  /* < */
+    for (var i = 0, il = str.length; i < il; ++i) {
+      var c = str.charCodeAt(i) & 0xff;
+      var n0 = c & 0xf;
+      var n1 = c >> 4;
+      buf[bufp++] = n1 + (n1 <= 9 ? 48 : 55);
+      buf[bufp++] = n0 + (n0 <= 9 ? 48 : 55);
+    }
+    buf[bufp++] = 62;  /* > */
+  }
+
+  function emit_string_literal(str) {
+    // TODO use hex string encoding when smaller than octal escapes.
+    buf[bufp++] = 40;  /* ( */
+    for (var i = 0, il = str.length; i < il; ++i) {
+      var c = str.charCodeAt(i) & 0xff;
+      switch (c) {
+        case 10:  /* n */  buf[bufp++] = 92; buf[bufp++] = 110; break;
+        case 13:  /* r */  buf[bufp++] = 92; buf[bufp++] = 114; break;
+        case  9:  /* t */  buf[bufp++] = 92; buf[bufp++] = 116; break;
+        case  8:  /* b */  buf[bufp++] = 92; buf[bufp++] =  98; break;
+        case 12:  /* f */  buf[bufp++] = 92; buf[bufp++] = 102; break;
+        case 40:  /* ) */  buf[bufp++] = 92; buf[bufp++] =  40; break;
+        case 41:  /* ( */  buf[bufp++] = 92; buf[bufp++] =  41; break;
+        case 92:  /* \ */  buf[bufp++] = 92; buf[bufp++] =  92; break;
+        default:
+          if (c < 33 || c > 126) {  // Octal escape.
+            buf[bufp++] = 92;
+            buf[bufp++] = c & 7;
+            buf[bufp++] = (c >> 3) & 7;
+            buf[bufp++] = (c >> 6) & 7;
+          } else {  // Printable ascii.
+            buf[bufp++] = c;
+          }
+      }
+    }
+    buf[bufp++] = 41;  /* ) */
+  }
+
+  function emit_string(str) {
     for (var i = 0, il = str.length; i < il; ++i) {
       buf[bufp++] = str.charCodeAt(i) & 0xff;
     }
-    return bufp;
   }
 
-  function emit_string_line(buf, bufp, str) {
+  function emit_string_line(str) {
     for (var i = 0, il = str.length; i < il; ++i) {
       buf[bufp++] = str.charCodeAt(i) & 0xff;
     }
-    buf[bufp++] = 10;
-    return bufp;
+    buf[bufp++] = 10;  /* \n */
   }
 
-  function emit_object(buf, bufp, obj) {
-    switch (obj.t) {
+  function emit_object(obj) {
+    var typ = obj_type(obj);
+    switch (typ) {
       // 3.2.1 - Boolean Objects.
       case 'bool':
-        bufp = emit_string(buf, bufp, obj.v === true ? 'true' : 'false');
+        emit_string(obj === true ? 'true' : 'false');
         break;
       // 3.2.2 - Numeric Objects.
       case 'num':
-        bufp = emit_string(buf, bufp, obj.v + '');
+        emit_string(obj + '');
         break;
       // 3.2.3 - String Objects.
       case 'str':
-        var str = obj.v.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').
-          replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/[\b]/g, '\\b').
-          replace(/\f/g, '\\f').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-        bufp = emit_string(buf, bufp, '(' + str + ')');
-        break;
-      case 'hexstr':
-        bufp = emit_string(buf, bufp, '<' + obj.v + '>');
+        emit_string_literal(obj);
         break;
       // 3.2.4 - Name Objects.
       case 'name':
-        bufp = emit_string(buf, bufp, obj.v);
+        emit_string(obj.str);
         break;
       // 3.2.5 - Array Objects.
       case 'array':
-        bufp = emit_string(buf, bufp, '[');
-        var a = obj.v;
-        for (var i = 0, il = a.length; i < il; ++i) {
-          bufp = emit_object(buf, bufp, a[i]);
-          bufp = emit_string(buf, bufp, ' ');
+        buf[bufp++] = 91;  /* [ */
+        for (var i = 0, il = obj.length; i < il; ++i) {
+          if (i !== 0) buf[bufp++] = 32;  /* ' ' */
+          emit_object(obj[i]);
         }
-        bufp = emit_string(buf, bufp, ']');
+        buf[bufp++] = 93;  /* ] */
         break;
       // 3.2.6 - Dictionary Objects.
       case 'dict':
-        bufp = emit_string(buf, bufp, '<<');
-        var a = obj.v;
+        buf[bufp++] = 60;  /* < */
+        buf[bufp++] = 60;  /* < */
         // Personally I think this makes more sense space wise, because I would
         // Think that a dictionary like /Key1/Val1/Key2/Key2 should parse, but
         // I am just following an example PDF and it seems to just do
@@ -541,78 +574,83 @@ function PDFWriter(buf) {
         /*
         for (var i = 0, il = a.length; i < il; ++i) {
           if (a[i].t !== 'name')
-            bufp = emit_string(buf, bufp, ' ');
-          bufp = emit_object(buf, bufp, a[i]);
+            emit_string(' ');
+          emit_object(a[i]);
         }
         */
+        var a = obj.internal_array();
         for (var i = 1, il = a.length; i < il; i += 2) {
-          bufp = emit_object(buf, bufp, a[i-1]);
-          bufp = emit_string(buf, bufp, ' ');
-          bufp = emit_object(buf, bufp, a[i]);
+          emit_object(a[i-1]);
+          buf[bufp++] = 32;  /* ' ' */
+          emit_object(a[i]);
         }
-        bufp = emit_string_line(buf, bufp, '>>');
+        buf[bufp++] = 62;  /* > */
+        buf[bufp++] = 62;  /* > */
+        //buf[bufp++] = 10;  /* \n */
         break;
       // 3.2.8 - Null Object.
       case 'null':
-        bufp = emit_string(buf, bufp, 'null');
+        emit_string('null');
         break;
       // 3.2.9 - Indirect Objects.
-      case 'obj':
-        bufp = emit_string_line(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' obj');
-        bufp = emit_object(buf, bufp, obj.v.v);
-        bufp = emit_string_line(buf, bufp, '');
-        bufp = emit_string_line(buf, bufp, 'endobj');
+      case 'indobj':
+        emit_string_line(obj.id + ' ' + obj.gen + ' obj');
+        emit_object(obj.obj);
+        emit_string_line('\nendobj');
         break;
       case 'objref':
-        bufp = emit_string(buf, bufp, obj.v.id + ' ' + obj.v.gen + ' R');
+        emit_string(obj.id + ' ' + obj.gen + ' R');
         break;
       case 'stream':
-        bufp = emit_object(buf, bufp, obj.v.d);
-        bufp = emit_string_line(buf, bufp, 'stream');
-        obj.v.s.copy(buf, bufp);
-        bufp += obj.v.s.length;
-        bufp = emit_string(buf, bufp, 'endstream');
+        emit_object(obj.dict);
+        emit_string_line('stream');
+        obj.data.copy(buf, bufp);
+        bufp += obj.data.length;
+        emit_string('endstream');
         break;
       default:
-        console.log('Unknown in emit: ' + obj.t);
+        console.log('Unknown type in emit: ' + typ);
     }
-    return bufp;
   }
 
-  this.write = function(header, body, tailer_dict) {
-    var xref_table = [ ];
+  this.write = function(header, body, trailer_dict) {
+    var xref_table = Array(body.length);
 
-    var bufp = 0;
-
-    bufp = emit_string_line(buf, bufp, header);
-    bufp = emit_string_line(buf, bufp, "%\xc7\xec\x8f\xa2");
+    emit_string_line(header);
+    emit_string_line("%\xc7\xec\x8f\xa2");
 
     for (var i = 0, il = body.length; i < il; ++i) {
       var obj = body[i];
-      if (obj.t !== 'obj') throw "Non-object body object.";
-      xref_table[obj.v.id] = bufp;
-      bufp = emit_object(buf, bufp, obj);
+      if (obj === undefined) continue;  // FIXME
+      if (!obj_is_indobj(obj)) throw "Non-indirect-object body object: " + i;
+      xref_table[obj.id] = bufp;
+      emit_object(obj);
     }
 
     var offset_to_xrefs = bufp;
-    bufp = emit_string_line(buf, bufp, 'xref');
-    bufp = emit_string_line(buf, bufp, '0 ' + xref_table.length);
-    bufp = emit_string_line(buf, bufp, '0000000000 65535 f ');
+    emit_string_line('xref');
+    emit_string_line('0 ' + xref_table.length);
+    emit_string_line('0000000000 65535 f ');
     for (var i = 1, il = xref_table.length; i < il; ++i) {
       var val = xref_table[i];
-      bufp = emit_string_line(buf, bufp, zero_pad(10, val) + ' 00000 n ');
+      if (val === undefined) {
+        emit_string_line(zero_pad(10, 0) + ' 00000 f ');  // FIXME
+      } else {
+        emit_string_line(zero_pad(10, val) + ' 00000 n ');
+      }
     }
-    bufp = emit_string_line(buf, bufp, 'trailer');
-    bufp = emit_object(buf, bufp, trailer_dict);
+    emit_string_line('trailer');
+    emit_object(trailer_dict);
+    emit_string_line('\nstartxref');
     /*
-    bufp = emit_object(buf, bufp, {v: [ {v: '/Size', t: 'name'},
-                                        {v: xref_table.length, t: 'num'},
-                                        {v: '/Root', t: 'name'},
-                                        {v: '/Size', t: 'name'},
-                                      ], t: 'dict'});
+    emit_object({v: [ {v: '/Size', t: 'name'},
+                      {v: xref_table.length, t: 'num'},
+                      {v: '/Root', t: 'name'},
+                      {v: '/Size', t: 'name'},
+                    ], t: 'dict'});
     */
-    bufp = emit_string_line(buf, bufp, offset_to_xrefs + '');
-    bufp = emit_string_line(buf, bufp, '%%EOF');
+    emit_string_line(offset_to_xrefs + '');
+    emit_string_line('%%EOF');
     return bufp;
   }
 }
@@ -836,27 +874,29 @@ function PDFReader(raw) {
     var data = new Uint8Array(stream.data);
     var filter_stream = make_filter_stream(
         filter.str, new pdfjsstream.Stream(data), stream.dict);
-    if (filter_stream === null) return null;
-    return filter_stream.getBytes();
+    if (filter_stream === null) return null;  // No decoder.
+    return new Buffer(filter_stream.getBytes());  // TODO: Too much copying.
   }
 
-  this.process_streams = function(callback) {
-    for (var i = 0, il = xref_table.length; i < il; ++i) {
-      var xref = xref_table[i];
-      if (!xref) continue;  // FIXME Free entries?
-      if (xref.o !== null) continue;  // TODO
-      var obj = consume_object_at(xref.i);
-      if (!obj_is_indobj(obj)) throw "Non-object body object.";
-      var inner = obj.obj;
-      if (!obj_is_stream(inner)) continue;
-      var data = filter_stream(inner);
-      if (data === null) {
-        //callback(inner, false, inner.data);
-        //inner.v.s = callback(data);
-      } else {
-        callback(inner, true, data);
-        //inner.v.s = callback(data);
+  this.map_streams = function(callback) {
+    for (var i = 0, il = object_table.length; i < il; ++i) {
+      var obj = objtec_table[i];
+      if (obj === undefined) continue;  // FIXME
+      var stream = obj.obj;
+      if (!obj_is_stream(stream)) continue;
+      var data = filter_stream(stream);
+      if (data === null)  // Couldn't decode
+        continue;
+      var res = callback(data, stream);
+      if (!res) continue;
+      stream.dict.del('/DecodeParams');
+      stream.dict.del('/Filter');
+      if (res.deflate === true) {
+        var zlib = require(__dirname + '/node-zlib.js');
+        stream.dict.set('/Filter', new Name('/FlateDecode'));
+        data = zlib.deflateSync(res.data);
       }
+      stream.data = data;
     }
   };
 
@@ -1080,6 +1120,28 @@ function PDFReader(raw) {
   }
   */
 
+  var object_table = Array(xref_table.length);
+  this.decode_objects = function() {
+    for (var i = 0, il = xref_table.length; i < il; ++i) {
+      var xref = xref_table[i];
+      if (!xref) continue;  // FIXME Free entries?
+      if (xref.o !== null) continue;  // TODO
+      var obj = consume_object_at(xref.i);
+      if (!obj_is_indobj(obj)) throw "Non-indirect-object body object.";
+      object_table[i] = obj;
+    }
+  };
+
+  this.write = function(writer) {
+    var dict = first_trailer_dict.dup();
+    dict.del('/Filter');
+    dict.del('/DecodeParms');
+    dict.del('/Type');
+    dict.del('/Prev');
+    dict.del('/Index');
+    dict.del('/W');
+    return writer.write(header, object_table, dict);
+  };
 }
 
 try {
