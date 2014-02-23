@@ -363,33 +363,32 @@ function PDFLexer(buf) {
       case 52:  /* 4 */ case 53:  /* 5 */ case 54:  /* 6 */ case 55:  /* 7 */
       case 56:  /* 8 */ case 57:  /* 9 */ case 46:  /* . */ case 45:  /* - */
       case 43:  /* + */
-        while (buf[bufp] === 48 ||  /* 0 */
-               buf[bufp] === 49 ||  /* 1 */
-               buf[bufp] === 50 ||  /* 2 */
-               buf[bufp] === 51 ||  /* 3 */
-               buf[bufp] === 52 ||  /* 4 */
-               buf[bufp] === 53 ||  /* 5 */
-               buf[bufp] === 54 ||  /* 6 */
-               buf[bufp] === 55 ||  /* 7 */
-               buf[bufp] === 56 ||  /* 8 */
-               buf[bufp] === 57 ||  /* 9 */
-               buf[bufp] === 46 ||  /* . */
-               buf[bufp] === 45 ||  /* - */
-               buf[bufp] === 43) {  /* + */
-            ++bufp;
-          }
-          var str = buf.slice(startp, bufp).toString('ascii');
-          return {v: parseFloat(str),
-                  t: 'num', s: startp, e: bufp};
+        do {
+          c = buf[++bufp];
+        } while (c === 48 ||  /* 0 */
+                 c === 49 ||  /* 1 */
+                 c === 50 ||  /* 2 */
+                 c === 51 ||  /* 3 */
+                 c === 52 ||  /* 4 */
+                 c === 53 ||  /* 5 */
+                 c === 54 ||  /* 6 */
+                 c === 55 ||  /* 7 */
+                 c === 56 ||  /* 8 */
+                 c === 57 ||  /* 9 */
+                 c === 46 ||  /* . */
+                 c === 45 ||  /* - */
+                 c === 43);   /* + */
+          return {v: parseFloat(ascii_substr(startp, bufp)), t: 'num',
+                  s: startp, e: bufp};
       // 3.2.3 - String Objects.
       case 40:  /* ( */
-        var chars = [ ];
+        var bytes = [ ];
         var nest = 0;  // Literal strings support "balanced paranthesis".
         while (bufp < buflen) {
-          ++bufp;
-          if (buf[bufp] === 92) { /* \ */
-            ++bufp;
-            switch (buf[bufp]) {
+          c = buf[++bufp];
+          if (c === 92) { /* \ */
+            c = buf[++bufp];
+            switch (c) {
               case 110:  /* n */  chars.push("\n"); break;
               case 114:  /* r */  chars.push("\r"); break;
               case 116:  /* t */  chars.push("\t"); break;
@@ -400,23 +399,24 @@ function PDFLexer(buf) {
               case  92:  /* \ */  chars.push("\\"); break;
               case  48:  /* 0 */ case  49:  /* 1 */
               case  50:  /* 2 */ case  51:  /* 3 */
-                chars.push(String.fromCharCode(
-                    parseInt(ascii_substr(bufp, bufp+3), 8)));
+                // TODO: Range check the octal <= 255.
+                bytes.push(parseInt(ascii_substr(bufp, bufp+3), 8));
                 bufp += 2;
                 break;
               default:
                 --bufp; break;
             }
-          } else if (buf[bufp] === 41 && nest === 0) {  /* ) */
+          } else if (c === 41 && nest === 0) {  /* ) */
             ++bufp;
             break;
           } else {
-            if (buf[bufp] === 40) ++nest;  /* ( */
-            if (buf[bufp] === 41) --nest;  /* ) */
-            chars.push(String.fromCharCode(buf[bufp]));
+            if (c === 40) ++nest;  /* ( */
+            if (c === 41) --nest;  /* ) */
+            bytes.push(c);
           }
         }
-        return {v: chars.join(''), t: 'str', s: startp, e: bufp};
+        return {v: String.fromCharCode.apply(null, bytes), t: 'str',
+                s: startp, e: bufp};
       // 3.2.4 - Name Objects.
       case 47: /* / */
         // "The name may include any regular characters, but not delimiter or
