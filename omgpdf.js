@@ -343,17 +343,20 @@ function PDFLexer(buf) {
     }
 
     // "The delimiter characters (, ), <, >, [, ], {, }, /, and % are special."
-    switch (buf[bufp]) {
+
+    var c = buf[bufp];
+    switch (c) {
       // Whitespace.
       case 0: case 9: case 10: case 12: case 13: case 32:
         do {
-          ++bufp;
-        } while (buf[bufp] ===  0 || buf[bufp] ===  9 || buf[bufp] === 10 ||
-                 buf[bufp] === 12 || buf[bufp] === 13 || buf[bufp] === 32);
+          c = buf[++bufp];
+        } while (c ===  0 || c ===  9 || c === 10 ||
+                 c === 12 || c === 13 || c === 32);
         return {v: null, t: 'ws', s: startp, e: bufp};
       // Comments.
       case 37: /* % */
-        while (buf[bufp] !== 10) ++bufp;  // Seek on newline.
+        // Seek up to newline.  Let the lexer process as whitespace next pass.
+        while (bufp < buflen && c !== 10 && c !== 13) c = buf[++bufp];
         return {v: null, t: 'cmt', s: startp, e: bufp};
       // 3.2.2 - Numeric Objects.
       case 48:  /* 0 */ case 49:  /* 1 */ case 50:  /* 2 */ case 51:  /* 3 */

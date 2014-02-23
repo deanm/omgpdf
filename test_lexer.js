@@ -53,6 +53,26 @@ function test_eol() {
   assert_eq(0, p.cur_pos());
 }
 
+function test_comments() {
+  var p = new PDFLexer(new Buffer("%xxxx%\n"));
+  assert_eq(0, p.cur_pos());
+  var t = p.consume_token_including_cmt_and_ws();
+  assert_eq('cmt', t.t);
+  assert_eq(6, p.cur_pos());
+
+  p = new PDFLexer(new Buffer("%xxxx%"));
+  assert_eq(0, p.cur_pos());
+  var t = p.consume_token_including_cmt_and_ws();
+  assert_eq('cmt', t.t);
+  assert_eq(6, p.cur_pos());
+
+  p = new PDFLexer(new Buffer("%xxxx\r"));
+  assert_eq(0, p.cur_pos());
+  var t = p.consume_token_including_cmt_and_ws();
+  assert_eq('cmt', t.t);
+  assert_eq(5, p.cur_pos());
+}
+
 function test_string_literals() {
   var strs = ['(yo yo)', '(yo(yo))', '(oo(())(()))'];
   var p = new PDFLexer(new Buffer(strs.join('')));
@@ -86,5 +106,6 @@ function test_hexstring_literals() {
 }
 
 test_eol();
+test_comments();
 test_string_literals();
 test_hexstring_literals();
