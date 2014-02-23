@@ -630,11 +630,18 @@ function PDFWriter(buf) {
     var offset_to_xrefs = bufp;
     emit_string_line('xref');
     emit_string_line('0 ' + xref_table.length);
-    emit_string_line('0000000000 65535 f ');
-    for (var i = 1, il = xref_table.length; i < il; ++i) {
+    for (var i = 0, il = xref_table.length; i < il; ++i) {
       var val = xref_table[i];
       if (val === undefined) {
-        emit_string_line(zero_pad(10, 0) + ' 00000 f ');  // FIXME
+        var next_free = 0;
+        for (var j = i+1; j < il; ++j) {
+          if (xref_table[j] === undefined) {
+            next_free = j;
+            break;
+          }
+        }
+        var genstr = i === 0 ? ' 65535 f ' : ' 00000 f ';
+        emit_string_line(zero_pad(10, next_free) + genstr);
       } else {
         emit_string_line(zero_pad(10, val) + ' 00000 n ');
       }
