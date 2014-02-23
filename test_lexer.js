@@ -86,6 +86,11 @@ function test_string_literals() {
   var t = p.consume_token();
   assert_eq('str', t.t);
   assert_eq("blah 3{ blah", t.v);
+
+  p = new PDFLexer(new Buffer("(\\n\\r\\t\\b\\f\\(\\)\\\\)"));
+  var t = p.consume_token();
+  assert_eq('str', t.t);
+  assert_eq("\n\r\t\b\f()\\", t.v);
 }
 
 function test_hexstring_literals() {

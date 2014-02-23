@@ -390,14 +390,14 @@ function PDFLexer(buf) {
           if (c === 92) { /* \ */
             c = buf[++bufp];
             switch (c) {
-              case 110:  /* n */  chars.push("\n"); break;
-              case 114:  /* r */  chars.push("\r"); break;
-              case 116:  /* t */  chars.push("\t"); break;
-              case  98:  /* b */  chars.push("\b"); break;
-              case 102:  /* f */  chars.push("\f"); break;
-              case  40:  /* ( */  chars.push("(");  break;
-              case  41:  /* ) */  chars.push(")");  break;
-              case  92:  /* \ */  chars.push("\\"); break;
+              case 110:  /* n */  bytes.push(10); break;
+              case 114:  /* r */  bytes.push(13); break;
+              case 116:  /* t */  bytes.push( 9); break;
+              case  98:  /* b */  bytes.push( 8); break;
+              case 102:  /* f */  bytes.push(12); break;
+              case  40:  /* ( */  bytes.push(40);  break;
+              case  41:  /* ) */  bytes.push(41);  break;
+              case  92:  /* \ */  bytes.push(92); break;
               case  48:  /* 0 */ case  49:  /* 1 */
               case  50:  /* 2 */ case  51:  /* 3 */
                 // TODO: Range check the octal <= 255.
