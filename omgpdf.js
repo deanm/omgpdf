@@ -1030,6 +1030,7 @@ function PDFReader(raw) {
   if (!/^%PDF-1\.[2-7]$/.test(header))  // TODO: Work out properly.
     throw "Unsupported PDF version? " + header;
 
+  /*
   var linearized_dict = null;  // Non-null means file is linearized.
   // NOTE: consume_object will eat through the comment that might be there to
   // indicate that the file is binary, no special handling for that needed.
@@ -1042,6 +1043,7 @@ function PDFReader(raw) {
   }
 
   // console.log(linearized_dict !== null);
+  */
 
   // Start working from the end.
   lexer.set_pos(lexer.end_pos());
