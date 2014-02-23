@@ -781,7 +781,7 @@ function PDFReader(raw) {
   function make_filter_stream(typ, stream, dict) {
     var params_dict = dict.get('/DecodeParms');
     var params = null;
-    if (params_dict) {
+    if (obj_is_dict(params_dict)) {
       var params = {
         get: function(x) {
           return params_dict.get('/' + x);
@@ -829,7 +829,7 @@ function PDFReader(raw) {
 
     var data = new Uint8Array(stream.data);
     var filter_stream = make_filter_stream(
-        filter.str, new pdfjsstream.Stream(data), stream.data);
+        filter.str, new pdfjsstream.Stream(data), stream.dict);
     if (filter_stream === null) return null;
     return filter_stream.getBytes();
   }
