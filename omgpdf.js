@@ -949,6 +949,7 @@ function PDFReader(raw) {
       var num_entries = index[i];
       total_num_xref_entries += num_entries;
       for (var j = 0; j < num_entries; ++j) {
+        var id = first_object + j;
         var f0 = (ws0 === 0) ? 1: 0, f1 = 0, f2 = 0;
         // TODO(deanm): Check xref_data bounds.
         for (var w = 0; w < ws0; ++w) f0 = (f0 << 8) | xref_data[p++];
@@ -960,14 +961,14 @@ function PDFReader(raw) {
             // TODO Free objects... need to do anything?
             break;
           case 1:
-            if (first_object + j in xref_table) throw 'dup';  // FIXME updates.
-            xref_table[first_object + j] = {o: null, i: f1};
+            if (id in xref_table) throw 'dup';  // FIXME updates.
+            xref_table[id] = {o: null, i: f1};
             // TODO gen?
             if (f2 !== 0) throw "Do something with gen...";
             break;
           case 2:
-            if (first_object + j in xref_table) throw 'dup';  // FIXME updates.
-            xref_table[first_object + j] = {o: f1, i: f2};
+            if (id in xref_table) throw 'dup';  // FIXME updates.
+            xref_table[id] = {o: f1, i: f2};
             break;
           default:
             throw 'Invalid xref type.';
