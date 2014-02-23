@@ -89,6 +89,18 @@ function Dictionary(a) {
     return false;
   };
 
+  this.set = function(key, val) {
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].str === key) {
+        a[i] = val;
+        return true;  // Replaced.
+      }
+    }
+
+    a.push(new Name(key), val);
+    return false;  // Inserted.
+  };
+
   this.del = function(key) {
     for (var i = 1, il = a.length; i < il; i += 2) {
       if (a[i-1].str === key) {
