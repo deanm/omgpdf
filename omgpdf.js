@@ -145,6 +145,8 @@ function PDFLexer(buf) {
   this.cur_byte = function() { return buf[bufp]; }
   this.adv_byte = function() { bufp++; };
   this.adv_bytes = function(n) { bufp += n; };
+  this.get_buf = function() { return buf; };
+  this.set_buf = function(b) { buf = b; buflen = b.length; };
 
   function ascii_substr(start, end) {
     return buf.toString('ascii', start, end);
@@ -816,10 +818,13 @@ function PDFReader(raw) {
     return obj;
   }
 
-  function consume_object_at(offset) {
+  function consume_object_at(objbuf, offset) {
+    var savebuf = lexer.get_buf();
     var savepos = lexer.cur_pos();
+    lexer.set_buf(objbuf);
     lexer.set_pos(offset);
     var obj = consume_object();
+    lexer.set_buf(savebuf);
     lexer.set_pos(savepos);
     return obj;
   }
@@ -829,7 +834,7 @@ function PDFReader(raw) {
     if (!obj_is_objref(obj)) throw 'Not objref in follow_indirect()';
     var xref_entry = xref_table[obj.id];
     if (xref_entry.o !== null) throw 'Object is in a stream, not supported';
-    var indobj = consume_object_at(xref_entry.i);
+    var indobj = consume_object_at(raw, xref_entry.i);
     if (!obj_is_indobj(indobj)) throw 'Not indobj in follow_indirect()';
     var obj2 = indobj.obj;
     if (checker(obj2) !== true) throw 'Checker failed in *follow_indirect()';
@@ -1141,11 +1146,31 @@ function PDFReader(raw) {
 
   var object_table = Array(xref_table.length);
   this.decode_objects = function() {
+    var last_external_stream_id = -1;
+    var last_external_stream_data = null;
     for (var i = 0, il = xref_table.length; i < il; ++i) {
       var xref = xref_table[i];
-      if (!xref) continue;  // FIXME Free entries?
-      if (xref.o !== null) continue;  // TODO
-      var obj = consume_object_at(xref.i);
+      if (xref === undefined) continue;  // FIXME Free entries?
+      var wasext = false;
+      var obj = null;
+      if (xref.o !== null) {
+        var objbuf = last_external_stream_data;
+        if (last_external_stream_id !== xref.o) {
+          if (xref_table[xref.o].o !== null) throw 'Too much indirection';
+          var extobj = consume_object_at(raw, xref_table[xref.o].i);
+          if (!obj_is_indobj(extobj)) throw 'Expecting indirect object';
+          if (!obj_is_stream(extobj.obj)) throw 'Expecting stream object';
+          objbuf = filter_stream(extobj.obj);
+          if (objbuf === null) throw 'Unable to filter stream.';
+          last_external_stream_id = xref.o;
+          last_external_stream_data = objbuf;
+        }
+        obj = consume_object_at(objbuf, xref.i);
+        if (obj_is_indobj(obj)) throw 'Expected non-indirect-object.';
+        obj = new IndirectObject(i, 0, obj);  // Wrap it in an IndirectObject.
+      } else {
+        obj = consume_object_at(raw, xref.i);
+      }
       if (!obj_is_indobj(obj)) throw "Non-indirect-object body object.";
       object_table[i] = obj;
     }
