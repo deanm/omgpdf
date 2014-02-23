@@ -511,7 +511,7 @@ function PDFWriter(buf) {
         case 41:  /* ( */  buf[bufp++] = 92; buf[bufp++] =  41; break;
         case 92:  /* \ */  buf[bufp++] = 92; buf[bufp++] =  92; break;
         default:
-          if (c < 33 || c > 126) {  // Octal escape.
+          if (c < 32 || c > 126) {  // Octal escape.
             buf[bufp++] = 92;
             buf[bufp++] = 48 + ((c >> 6) & 7);
             buf[bufp++] = 48 + ((c >> 3) & 7);
