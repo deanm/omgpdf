@@ -736,7 +736,7 @@ function PDFReader(raw) {
         var s = consume_object();
         if (s !== null && s instanceof Stream) {  // Process dict+stream.
           s.dict = dict;
-          var streamlen = dict.get_checked('/Length', obj_is_num);
+          var streamlen = follow_indirect(dict.get('/Length'), obj_is_num);
           if (streamlen !== s.data.length) {
             // We don't properly handle EOL in the stream consumption, so we
             // assume if we're off by 1 or 2 it's because of EOL markers.
@@ -817,9 +817,16 @@ function PDFReader(raw) {
     return obj;
   }
 
-  function obj_key(obj) {
-    if (!obj_is_indobj(obj) && !obj_is_objref(obj)) throw "Can't key object.";
-    return obj.id + '_' + obj.gen;
+  function follow_indirect(obj, checker) {
+    if (checker(obj) === true) return obj;
+    if (!obj_is_objref(obj)) throw 'Not objref in follow_indirect()';
+    var xref_entry = xref_table[obj.id];
+    if (xref_entry.o !== null) throw 'Object is in a stream, not supported';
+    var indobj = consume_object_at(xref_entry.i);
+    if (!obj_is_indobj(indobj)) throw 'Not indobj in follow_indirect()';
+    var obj2 = indobj.obj;
+    if (checker(obj2) !== true) throw 'Checker failed in *follow_indirect()';
+    return obj2;
   }
 
   function make_filter_stream(typ, stream, dict) {
