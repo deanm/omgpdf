@@ -458,13 +458,41 @@ function PDFLexer(buf) {
           ++bufp;
           return {v: null, t: '<<', s: startp, e: bufp};
         } else {
-          bufp = startp + 1;
-          var str = consume_string_until_char(62);
-          if (str.length & 1) throw "Odd number of characters in hex string";
+          var bytes = [ ];
+          var num_digits = 0;
+          digits: for (var b = 0; bufp < buflen; ++num_digits, ++bufp) {
+            var base = 0;
+
+            switch (buf[bufp]) {
+              case 48: case 49: case 50: case 51: case 52:
+              case 53: case 54: case 55: case 56: case 57:              // 0-9
+                base = 48; break;
+              case 65: case 66: case 67: case 68: case 69: case 70:     // A-F
+                base = 55; break;
+              case 97: case 98: case 99: case 100: case 101: case 102:  // a-f
+                base = 87; break;
+              case 62:                                                  // >
+                break digits;
+              default:
+                throw 'Invalid character in hex string';
+            }
+
+            b = (b << 4) | (buf[bufp] - base);
+            if (num_digits & 1 === 1) {
+              bytes.push(b);
+              b = 0;
+            }
+          }
+
+          if (num_digits & 1 === 1) throw "Odd number of digits in hex string";
+
+          // TODO: Is it right to just treat this as a string?  It is safe to
+          // go to fromCharCode and back for all 8-bit, so just use a string.
+          var str = String.fromCharCode.apply(null, bytes);
           return {v: str, t: 'hexstr', s: startp, e: bufp};
         }
       case 62:  /* > */
-        if (buf[bufp+1] !== 62) throw "Unexpected single > in lexer."
+        if (buf[bufp+1] !== 62) throw "Unexpected single > in lexer"
         bufp += 2;
           return {v: null, t: '>>', s: startp, e: bufp};
       // 3.2.9 - Indirect Objects.

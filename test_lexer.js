@@ -12,6 +12,16 @@ function assert_eq(a, b) {
   }
 }
 
+function assert_throws(estr, cb) {
+  try {
+    cb();
+  } catch(e) {
+    assert_eq(estr, e.toString());
+    return;
+  }
+  throw 'Expected an exception.';
+}
+
 function test_eol() {
   var p = new PDFLexer(new Buffer('boc\r\nboc\r\r\nboc\nboc\rboc\r\n'));
   // Forwards.
@@ -58,5 +68,23 @@ function test_string_literals() {
   assert_eq("blah 3{ blah", t.v);
 }
 
+function test_hexstring_literals() {
+  var strs = ['<00FF>', "\x00\xff", '<34207d>', '4 }'];
+  for (var i = 1, il = strs.length; i < il; i += 2) {
+    var p = new PDFLexer(new Buffer(strs[i-1]));
+    var t = p.consume_token();
+    assert_eq('hexstr', t.t);
+    assert_eq(strs[i], t.v);
+  }
+
+  p = new PDFLexer(new Buffer("<0Z>"));
+  assert_throws('Invalid character in hex string',
+                function() { p.consume_token(); });
+  p = new PDFLexer(new Buffer("<0FF>"));
+  assert_throws('Odd number of digits in hex string',
+                function() { p.consume_token(); });
+}
+
 test_eol();
 test_string_literals();
+test_hexstring_literals();
