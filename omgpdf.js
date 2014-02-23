@@ -511,9 +511,9 @@ function PDFWriter(buf) {
         default:
           if (c < 33 || c > 126) {  // Octal escape.
             buf[bufp++] = 92;
-            buf[bufp++] = c & 7;
-            buf[bufp++] = (c >> 3) & 7;
-            buf[bufp++] = (c >> 6) & 7;
+            buf[bufp++] = 48 + ((c >> 6) & 7);
+            buf[bufp++] = 48 + ((c >> 3) & 7);
+            buf[bufp++] = 48 + (c & 7);
           } else {  // Printable ascii.
             buf[bufp++] = c;
           }
