@@ -1142,7 +1142,7 @@ function PDFReader(raw) {
   }
   */
 
-  var object_table = Array(xref_table.length);
+  var object_table = null;
   this.decode_objects = function() {
     object_table = Array(xref_table.length);
     var last_ext_id = -1;
