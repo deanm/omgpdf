@@ -95,6 +95,8 @@ function test_hexstring_literals() {
     var t = p.consume_token();
     assert_eq('hexstr', t.t);
     assert_eq(strs[i], t.v);
+    t = p.consume_token();
+    assert_eq(null, t);
   }
 
   p = new PDFLexer(new Buffer("<0Z>"));

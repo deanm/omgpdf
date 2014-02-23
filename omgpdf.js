@@ -253,6 +253,8 @@ function PDFLexer(buf) {
   }
 
   this.consume_token_including_cmt_and_ws = function() {
+    if (bufp >= buflen) return null;
+
     var startp = bufp;
 
     // 3.2.1 - Boolean Objects.
@@ -475,7 +477,7 @@ function PDFLexer(buf) {
               case 97: case 98: case 99: case 100: case 101: case 102:  // a-f
                 base = 87; break;
               case 62:                                                  // >
-                break digits;
+                ++bufp; break digits;
               default:
                 throw 'Invalid character in hex string';
             }
@@ -508,10 +510,11 @@ function PDFLexer(buf) {
   };
 
   this.consume_token = function() {
-    while (true) {
+    while (bufp < buflen) {
       var token = this.consume_token_including_cmt_and_ws();
       if (token.t !== 'ws' && token.t !== 'cmt') return token;
     }
+    return null;
   };
 }
 
