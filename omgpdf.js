@@ -131,42 +131,113 @@ function PDFLZWOutputIndexStream(code_stream, code_length, p,
   return op;
 }
 
-function dict_has(dict, name) {
-  var a = dict.v;
-  for (var i = 1, il = a.length; i < il; i += 2) {
-    if (a[i-1].v === name) return true;
+function obj_type(o) {
+  switch (typeof(o)) {
+    case 'boolean':
+      return 'bool';
+    case 'string':
+      return 'str';
+    case 'number':
+      //return (o|0) === o ? 'int' : 'real';
+      return 'num';
   }
-  return false;
+
+  if (o === null) return 'null';
+  if (Array.isArray(o)) return 'array';
+  if (o instanceof Name) return 'name';
+  if (o instanceof Dictionary) return 'dict';
+  if (o instanceof IndirectObject) return 'indobj';
+  if (o instanceof ObjectReference) return 'objref';
+  if (o instanceof Stream) return 'stream';
+
+  return null;
 }
 
-function dict_get(dict, name) {
-  var a = dict.v;
-  for (var i = 1, il = a.length; i < il; i += 2) {
-    if (a[i-1].v === name) return a[i];
+/*
+function obj_is_type(o, typ) {
+  switch (typ) {
+    case 'bool':   return typeof(o) === 'boolean';
+    case 'str':    return typeof(o) === 'string';
+    case 'num':    return typeof(o) === 'number';
+    case 'null':   return o === null;
+    case 'array':  return Array.isArray(o);
+    case 'name':   return o instanceof Name;
+    case 'dict':   return o instanceof Dictionary;
+    case 'indobj': return o instanceof IndirectObject;
+    case 'objref': return o instanceof ObjectReference;
+    case 'stream': return o instanceof Stream;
+    default:       return false;
   }
-  return undefined;
 }
+*/
 
-function dict_get_value_checked(dict, name, typ) {
-  var v = dict_get(dict, name);
-  if (v === undefined)
-    throw 'Field not in dictionary: ' + name;
-  if (v.t !== typ)
-    throw 'Field has unexpected type: ' + v.t;
-  return v.v;
-}
+function obj_is_bool(o)   { return typeof(o) === 'boolean'; }
+function obj_is_str(o)    { return typeof(o) === 'string'; }
+function obj_is_num(o)    { return typeof(o) === 'number'; }
+function obj_is_null(o)   { return o === null; }
+function obj_is_array(o)  { return Array.isArray(o); }
+function obj_is_name(o)   { return o instanceof Name; }
+function obj_is_dict(o)   { return o instanceof Dictionary; }
+function obj_is_indobj(o) { return o instanceof IndirectObject; }
+function obj_is_objref(o) { return o instanceof ObjectReference; }
+function obj_is_stream(o) { return o instanceof Stream; }
 
-function dict_del(dict, name) {
-  var a = dict.v;
-  for (var i = 1, il = a.length; i < il; i += 2) {
-    if (a[i-1].v === name) {
-      a.splice(i-1, 2);
-      return true;
+function Name(str) {
+  this.str = str;
+};
+
+function Dictionary(a) {
+  this.get = function(key) {
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].str === key) return a[i];
     }
-  }
-  return false;
+    return undefined;
+  };
+
+  this.get_type_checked = function(key, typ) {
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].str === key) {
+        var v = a[i];
+        if (obj_type(v) !== typ) throw 'Type expectation mismatch: ' + typ;
+        return v;
+      }
+    }
+    throw 'Key not in dictionary: ' + key;
+  };
+
+  this.has = function(key) {
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].str === key) return true;
+    }
+    return false;
+  };
+
+  this.del = function(key) {
+    for (var i = 1, il = a.length; i < il; i += 2) {
+      if (a[i-1].str === key) {
+        a.splice(i-1, 2);
+        return true;
+      }
+    }
+    return false;
+  };
 }
 
+function IndirectObject(id, gen, obj) {
+  this.id  = id;
+  this.gen = gen;
+  this.obj = obj;
+}
+
+function ObjectReference(id, gen) {
+  this.id  = id;
+  this.gen = gen;
+}
+
+function Stream(data, dict) {
+  this.data = data;
+  this.dict = dict;
+}
 
 function PDFLexer(buf) {
   var bufp = 0;
@@ -654,61 +725,64 @@ function PDFWriter(buf) {
 function PDFReader(raw) {
   var lexer = new PDFLexer(raw);
 
+  var kDummyObjectRightBracket = { };
+  var kDummyObjectRightChevron = { };
+  var kDummyObjectEndObj       = { };
+
   function consume_objectish() {
     var token = lexer.consume_token();
     switch (token.t) {
       // 3.2.1 - Boolean Objects.
       case 'bool':
-        return {v: token.v, t: 'bool'};
+        return token.v;  // bool
       // 3.2.2 - Numeric Objects.
       case 'num':
         // 3.2.9 - Indirect Objects.
         var savepos = lexer.cur_pos();
-        var type = 'num';
+        var typ = 'num';
         var peeked = [ ];
         for (var i = 0; i < 2; ++i) {
           var peek = lexer.consume_token();
           if (i === 0 && peek.t !== 'num') break;
           if (i === 1) {
-            if (peek.t === 'obj' || peek.t === 'objref') type = peek.t;
+            if (peek.t === 'obj' || peek.t === 'objref') typ = peek.t;
           }
           peeked.push(peek);
         }
 
-        if (type === 'num') {
+        if (typ === 'num') {
           lexer.set_pos(savepos);
-          return {v: token.v, t: 'num'};
+          return token.v;  // num
         }
 
         var obj_id = token.v, obj_gen = peeked[0].v,
             obj_token = peeked[1];
 
-        if (type === 'objref')
-          return {v: {id: obj_id, gen: obj_gen}, t: 'objref'};
+        if (typ === 'objref')
+          return new ObjectReference(obj_id, obj_gen);
 
         var inner_obj = consume_object();
-        if (consume_object().t !== '_endobj')
+        if (consume_object() !== kDummyObjectEndObj)
           throw "Unable to find endobj.";
-        return {v: {id: obj_id, gen: obj_gen, v: inner_obj}, t: 'obj'};
+        return new IndirectObject(obj_id, obj_gen, inner_obj);
       // 3.2.3 - String Objects.
       case 'str':
-        return {v: token.v, t: 'str'};
       case 'hexstr':
-        return {v: token.v, t: 'hexstr'};
+        return token.v;  // str
       // 3.2.4 - Name Objects.
       case 'name':
-        return {v: token.v, t: 'name'};
+        return new Name(token.v);
       // 3.2.5 - Array Objects.
       case '[':
         var objs = [ ];
         while (true) {
           var obj = consume_object();
-          if (obj.t === '_]') break;
+          if (obj === kDummyObjectRightBracket) break;
           objs.push(obj);
         }
-        return {v: objs, t: 'array'};
+        return objs;  // array
       case ']':
-        return {v: null, t: '_]'};
+        return kDummyObjectRightBracket;
       // 3.2.6 - Dictionary Objects.
       case '<<':
         //   "Note: No two entries in the same dictionary should have the same
@@ -717,42 +791,42 @@ function PDFReader(raw) {
         var objs = [ ];
         while (true) {
           var obj = consume_object();
-          if (obj.t === '_>>') break;
+          if (obj === kDummyObjectRightChevron) break;
           objs.push(obj);
         }
 
         if (objs.length & 1) throw "Dictionary has odd number of elements.";
 
+        var dict = new Dictionary(objs);
+
         var savepos = lexer.cur_pos();
-        var nextobj = consume_object();
-        if (nextobj !== null && nextobj.t === "_stream") {
-          var s = {v: {d: {v: objs, t: 'dict'}, s: nextobj.v}, t: 'stream'};
-          var len_obj = dict_get(s.v.d, '/Length');
-          if (len_obj === undefined || len_obj.t !== 'num')
-            throw 'Invalid /Length in stream dictionary.';
-          if (len_obj.v !== s.v.s.length) {
+        var s = consume_object();
+        if (s !== null && s instanceof Stream) {  // Process dict+stream.
+          s.dict = dict;
+          var streamlen = dict.get_type_checked('/Length', 'num');
+          if (streamlen !== s.data.length) {
             // We don't properly handle EOL in the stream consumption, so we
             // assume if we're off by 1 or 2 it's because of EOL markers.
-            if (s.v.s.length > len_obj.v && s.v.s.length - len_obj.v <= 2) {
-              if (s.v.s.length - len_obj.v == 2) {
-                if (s.v.s[len_obj.v] !== 13 || s.v.s[len_obj.v+1] !== 10)
+            if (s.data.length > streamlen && s.data.length - streamlen <= 2) {
+              if (s.data.length - streamlen == 2) {
+                if (s.data[streamlen] !== 13 || s.data[streamlen+1] !== 10)
                   throw 'Invalid stream EOL.';
               } else {
-                if (s.v.s[len_obj.v] !== 10) throw 'Invalid stream EOL.';
+                if (s.data[streamlen] !== 10) throw 'Invalid stream EOL.';
               }
-              s.v.s = s.v.s.slice(0, len_obj.v);
+              s.data = s.data.slice(0, streamlen);
             } else {
               throw "Stream length doesn't match /Length in dictionary: " +
-                    len_obj.v + " != " + s.v.s.length;
+                    streamlen + " != " + s.data.length;
             }
           }
-          return s;
+          return s;  // stream
         }
 
         lexer.set_pos(savepos);
-        return {v: objs, t: 'dict'};
+        return dict;  // dict
       case '>>':
-        return {v: null, t: '_>>'};
+        return kDummyObjectRightChevron;
       // 3.2.7 - Stream Objects.
       case 'stream':
         var kEndstream = [101, 110, 100, 115, 116, 114, 101, 97, 109];
@@ -775,17 +849,19 @@ function PDFReader(raw) {
         //  and before endstream; this marker is not included in the stream
         //  length."
         var streamdata = lexer.consume_buffer_until_chars(kEndstream);
-        return {v: streamdata, t: '_stream'};
+        // TODO: protect this from coming in without a dictionary, it should
+        // only be produced in the above code handling <<.
+        return new Stream(streamdata, null);
       case 'endstream':
         throw "Unexpected endstream";
       // 3.2.8 - Null Object.
       case 'null':
-        return {v: null, t: 'null'};
+        return null;  // null
       // 3.2.9 - Indirect Objects.
       case 'obj':
         throw "Unexpected obj";  // Handled above in 'num' token.
       case 'endobj':
-        return {v: null, t: '_endobj'};
+        return kDummyObjectEndObj;
       case 'xref': case 'startxref':
         return null;  // EOF of body.
     }
@@ -809,18 +885,17 @@ function PDFReader(raw) {
   }
 
   function obj_key(obj) {
-    if (obj.t !== 'obj' && obj.t !== 'objref') throw "Can't key object.";
-    return obj.v.id + '_' + obj.v.gen;
+    if (!obj_is_indobj(obj) && !obj_is_objref(obj)) throw "Can't key object.";
+    return obj.id + '_' + obj.gen;
   }
 
   function make_filter_stream(typ, stream, dict) {
-    var params_dict = dict_get(dict, '/DecodeParms');
+    var params_dict = dict.get('/DecodeParms');
     var params = null;
     if (params_dict) {
       var params = {
         get: function(x) {
-          var v = dict_get(params_dict, '/' + x);
-          return v ? v.v : undefined;
+          return params_dict.get('/' + x);
         },
       };
     }
@@ -859,13 +934,13 @@ function PDFReader(raw) {
   }
 
   function filter_stream(stream) {
-    if (stream.t !== 'stream') throw "Not a stream.";
-    var filter = dict_get(stream.v.d, '/Filter');
-    if (filter === undefined) return stream.v.s;
+    if (!obj_is_stream(stream)) throw "Not a stream.";
+    var filter = stream.dict.get('/Filter');
+    if (!obj_is_name(filter)) return stream.data;
 
-    var data = new Uint8Array(stream.v.s);
+    var data = new Uint8Array(stream.data);
     var filter_stream = make_filter_stream(
-        filter.v, new pdfjsstream.Stream(data), stream.v.d);
+        filter.str, new pdfjsstream.Stream(data), stream.data);
     if (filter_stream === null) return null;
     return filter_stream.getBytes();
   }
@@ -876,12 +951,12 @@ function PDFReader(raw) {
       if (!xref) continue;  // FIXME Free entries?
       if (xref.o !== null) continue;  // TODO
       var obj = consume_object_at(xref.i);
-      if (obj.t !== 'obj') throw "Non-object body object.";
-      var inner = obj.v.v;
-      if (inner.t !== 'stream') continue;
+      if (!obj_is_indobj(obj)) throw "Non-object body object.";
+      var inner = obj.obj;
+      if (!obj_is_stream(inner)) continue;
       var data = filter_stream(inner);
       if (data === null) {
-        callback(inner, false, inner.v.s);
+        //callback(inner, false, inner.data);
         //inner.v.s = callback(data);
       } else {
         callback(inner, true, data);
@@ -903,10 +978,10 @@ function PDFReader(raw) {
     trailer_dict = consume_object();
 
     if (num_objects === null) {  // Appears right to keep the first /Size.
-      var num_objects_obj = dict_get(trailer_dict, '/Size');
-      if (num_objects_obj === undefined || num_objects_obj.t !== 'num')
+      var num_objects_obj = trailer_dict.get('/Size');
+      if (!obj_is_num(num_objects_obj))
         throw 'Invalid /Size in trailer dictionary.';
-      num_objects = num_objects_obj.v;
+      num_objects = num_objects_obj;
     }
 
     if (first_trailer_dict === null) first_trailer_dict = trailer_dict;
@@ -945,34 +1020,37 @@ function PDFReader(raw) {
 
   function process_xref_stream() {
     var xref_stream_obj = consume_object();
-    if (!xref_stream_obj || xref_stream_obj.t !== 'obj')
+    if (!obj_is_indobj(xref_stream_obj))
       throw "Expected xref stream object.";
-    var xref_stream = xref_stream_obj.v.v;
-    if (!xref_stream || xref_stream.t !== 'stream')
+    var xref_stream = xref_stream_obj.obj;
+    if (!obj_is_stream(xref_stream))
       throw "Expected xref stream.";
 
-    trailer_dict = xref_stream.v.d;
+    trailer_dict = xref_stream.dict;
 
-    if (dict_get_value_checked(trailer_dict, '/Type', 'name') !== '/XRef')
+    if (trailer_dict.get_type_checked('/Type', 'name').str !== '/XRef')
       throw 'Invalid xref stream type.';
 
-    var size = dict_get_value_checked(trailer_dict, '/Size', 'num');
+    var size = trailer_dict.get_type_checked('/Size', 'num');
 
     if (num_objects === null)  // Appears right to keep the first /Size.
       num_objects = size;
 
     var index = [0, size];
-    if (dict_has(trailer_dict, '/Index')) {
-      index = dict_get_value_checked(trailer_dict, '/Index', 'array');
-      index = index.map(function(x) { return x.v; });
+    if (trailer_dict.has('/Index')) {
+      index = trailer_dict.get_type_checked('/Index', 'array');
+      for (var i = 0, il = index.length; i < il; ++i) {
+        if (!obj_is_num(index[i])) throw 'Non-number in /Index';
+      }
     }
 
-    var w_obj = dict_get(trailer_dict, '/W');
-    if (!w_obj || w_obj.t !== 'array' || w_obj.v.length !== 3)
+    var w_obj = trailer_dict.get('/W');
+    if (!obj_is_array(w_obj) || w_obj.length !== 3)
       throw 'Invalid /W entry.';
-    var ws0 = w_obj.v[0].v,
-        ws1 = w_obj.v[1].v,
-        ws2 = w_obj.v[2].v;
+    for (var i = 0, il = w_obj.length; i < il; ++i) {
+      if (!obj_is_num(w_obj[i])) throw 'Non-number in /W';
+    }
+    var ws0 = w_obj[0], ws1 = w_obj[1], ws2 = w_obj[2];
 
     var xref_data = filter_stream(xref_stream);
 
@@ -1020,9 +1098,10 @@ function PDFReader(raw) {
   // NOTE: consume_object will eat through the comment that might be there to
   // indicate that the file is binary, no special handling for that needed.
   var maybe_linear_obj = consume_object();
-  if (maybe_linear_obj && maybe_linear_obj.t === 'obj') {
-    var lin_obj = dict_get(maybe_linear_obj.v.v, '/Linearized');
-    if (lin_obj !== undefined && lin_obj.t === 'num' && lin_obj.v === 1)
+  if (obj_is_indobj(maybe_linear_obj) &&
+      obj_is_dict(maybe_linear_obj.obj)) {
+    var lin_obj = maybe_linear_obj.obj.get('/Linearized');
+    if (obj_is_num(lin_obj) && lin_obj === 1)
       linearized_dict = lin_obj;
   }
 
@@ -1040,7 +1119,6 @@ function PDFReader(raw) {
   lexer.seek_to_chars_bw([60, 60]);  // <<.
   lexer.seek_to_chars_bw([116, 114, 97, 105, 108, 101, 114]);  // trailer.
 
-
   lexer.set_pos(byte_offset_to_last_xref);
 
   while (true) {
@@ -1055,9 +1133,9 @@ function PDFReader(raw) {
       process_xref_stream();
     }
 
-    var prev_obj = dict_get(trailer_dict, '/Prev');
-    if (prev_obj && prev_obj.t === 'num') {
-      lexer.set_pos(prev_obj.v);  // Repeat.
+    var prev_obj = trailer_dict.get('/Prev');
+    if (obj_is_num(prev_obj)) {
+      lexer.set_pos(prev_obj);  // Repeat.
     } else {
       break;
     }
@@ -1069,8 +1147,8 @@ function PDFReader(raw) {
     throw 'Mismatch between xref table size and /Size.';
   }
 
-  var root = dict_get(first_trailer_dict, '/Root');
-  if (root === undefined || root.t !== 'objref')
+  var root = first_trailer_dict.get('/Root');
+  if (!obj_is_objref(root))
     throw "Invalid /Root in trailer dictionary.";
 
   /*
