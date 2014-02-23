@@ -819,13 +819,10 @@ function PDFReader(raw) {
     return obj;
   }
 
-  function consume_object_at(objbuf, offset) {
-    var savebuf = lexer.get_buf();
+  function consume_object_at(offset) {
     var savepos = lexer.cur_pos();
-    lexer.set_buf(objbuf);
     lexer.set_pos(offset);
     var obj = consume_object();
-    lexer.set_buf(savebuf);
     lexer.set_pos(savepos);
     return obj;
   }
@@ -835,7 +832,7 @@ function PDFReader(raw) {
     if (!obj_is_objref(obj)) throw 'Not objref in follow_indirect()';
     var xref_entry = xref_table[obj.id];
     if (xref_entry.o !== null) throw 'Object is in a stream, not supported';
-    var indobj = consume_object_at(raw, xref_entry.i);
+    var indobj = consume_object_at(xref_entry.i);
     if (!obj_is_indobj(indobj)) throw 'Not indobj in follow_indirect()';
     var obj2 = indobj.obj;
     if (checker(obj2) !== true) throw 'Checker failed in *follow_indirect()';
@@ -1147,31 +1144,67 @@ function PDFReader(raw) {
 
   var object_table = Array(xref_table.length);
   this.decode_objects = function() {
-    var last_external_stream_id = -1;
-    var last_external_stream_data = null;
+    object_table = Array(xref_table.length);
+    var last_ext_id = -1;
+    var last_ext_data = null;
+    var last_ext_offsets = null;
     for (var i = 0, il = xref_table.length; i < il; ++i) {
       var xref = xref_table[i];
       if (xref === undefined) continue;  // FIXME Free entries?
       var wasext = false;
       var obj = null;
-      if (xref.o !== null) {
-        var objbuf = last_external_stream_data;
-        if (last_external_stream_id !== xref.o) {
+      if (xref.o !== null) {  // Object is in an object stream.
+        var objbuf = last_ext_data;
+        if (last_ext_id !== xref.o) {
           if (xref_table[xref.o].o !== null) throw 'Too much indirection';
-          var extobj = consume_object_at(raw, xref_table[xref.o].i);
+          var extobj = consume_object_at(xref_table[xref.o].i);
           if (!obj_is_indobj(extobj)) throw 'Expecting indirect object';
-          if (!obj_is_stream(extobj.obj)) throw 'Expecting stream object';
+          var s = extobj.obj;
+          if (!obj_is_stream(s)) throw 'Expecting stream object';
+          if (s.dict.get_checked('/Type', obj_is_name).str !== '/ObjStm')
+              throw 'Expecting stream object of type ObjStm';
           objbuf = filter_stream(extobj.obj);
           if (objbuf === null) throw 'Unable to filter stream.';
-          last_external_stream_id = xref.o;
-          last_external_stream_data = objbuf;
+
+          var start_offset = s.dict.get_checked('/First', obj_is_num);
+          var num = s.dict.get_checked('/N', obj_is_num);
+          last_ext_offsets = Array(num * 2);
+          last_ext_id = xref.o;
+          last_ext_data = objbuf;
+
+          // Read the [<id> <offset from /First> ...] table.
+          var savebuf = lexer.get_buf();
+          var savepos = lexer.cur_pos();
+          lexer.set_buf(objbuf);
+          lexer.set_pos(0);
+          for (var j = 0; j < num * 2; ++j) {
+            var w = consume_object();
+            if (!obj_is_num(w)) throw 'Non-number in offset table.';
+            last_ext_offsets[j] = w + ((j & 1) ? start_offset : 0);
+          }
+          lexer.set_buf(savebuf);
+          lexer.set_pos(savepos);
         }
-        obj = consume_object_at(objbuf, xref.i);
+
+        if (xref.i*2 >= last_ext_offsets.length)
+          throw 'Object stream index out of bounds';
+        if (i !== last_ext_offsets[xref.i * 2])
+          throw 'Object Stream IDs do not match';
+
+        var byte_offset = last_ext_offsets[xref.i * 2 + 1];
+
+        var savebuf = lexer.get_buf();
+        lexer.set_buf(objbuf);
+        obj = consume_object_at(byte_offset);
+        lexer.set_buf(savebuf);
+
         if (obj_is_indobj(obj)) throw 'Expected non-indirect-object.';
         obj = new IndirectObject(i, 0, obj);  // Wrap it in an IndirectObject.
-      } else {
-        obj = consume_object_at(raw, xref.i);
+
+      } else {  // Object is not in an object stream.
+        obj = consume_object_at(xref.i);
       }
+
       if (!obj_is_indobj(obj)) throw "Non-indirect-object body object.";
       object_table[i] = obj;
     }
