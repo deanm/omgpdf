@@ -603,7 +603,7 @@ function PDFWriter(buf) {
         break;
       case 'stream':
         emit_object(obj.dict);
-        emit_string_line('stream');
+        emit_string_line('\nstream');
         obj.data.copy(buf, bufp);
         bufp += obj.data.length;
         emit_string('endstream');
