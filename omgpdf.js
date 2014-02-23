@@ -263,7 +263,7 @@ function PDFLexer(buf) {
         buf[bufp+2] === 117 &&  /* u */
         buf[bufp+3] === 101) {  /* e */
       bufp += 4;
-      return {v: true, t: 'bool', s: startp, e: bufp};
+      return {v: true, t: 'bool'};
     }
     if (buf[bufp+0] === 102 &&  /* f */
         buf[bufp+1] ===  97 &&  /* a */
@@ -271,7 +271,7 @@ function PDFLexer(buf) {
         buf[bufp+3] === 115 &&  /* s */
         buf[bufp+4] === 101) {  /* e */
       bufp += 5;
-      return {v: false, t: 'bool', s: startp, e: bufp};
+      return {v: false, t: 'bool'};
     }
 
     // 3.2.7 - Stream Objects.
@@ -282,7 +282,7 @@ function PDFLexer(buf) {
         buf[bufp+4] ===  97 &&  /* a */
         buf[bufp+5] === 109) {  /* m */
       bufp += 6;
-      return {v: false, t: 'stream', s: startp, e: bufp};
+      return {v: false, t: 'stream'};
     }
     if (buf[bufp+0] === 101 &&  /* e */
         buf[bufp+1] === 110 &&  /* n */
@@ -294,7 +294,7 @@ function PDFLexer(buf) {
         buf[bufp+7] ===  97 &&  /* a */
         buf[bufp+8] === 109) {  /* m */
       bufp += 9;
-      return {v: false, t: 'endstream', s: startp, e: bufp};
+      return {v: false, t: 'endstream'};
     }
 
     // 3.2.8 - Null Object.
@@ -303,7 +303,7 @@ function PDFLexer(buf) {
         buf[bufp+2] === 108 &&  /* l */
         buf[bufp+3] === 108) {  /* l */
       bufp += 4;
-      return {v: null, t: 'null', s: startp, e: bufp};
+      return {v: null, t: 'null'};
     }
 
     // 3.2.9 - Indirect Objects.
@@ -311,7 +311,7 @@ function PDFLexer(buf) {
         buf[bufp+1] ===  98 &&  /* b */
         buf[bufp+2] === 106) {  /* j */
       bufp += 3;
-      return {v: false, t: 'obj', s: startp, e: bufp};
+      return {v: false, t: 'obj'};
     }
     if (buf[bufp+0] === 101 &&  /* e */
         buf[bufp+1] === 110 &&  /* n */
@@ -320,7 +320,7 @@ function PDFLexer(buf) {
         buf[bufp+4] ===  98 &&  /* b */
         buf[bufp+5] === 106) {  /* j */
       bufp += 6;
-      return {v: false, t: 'endobj', s: startp, e: bufp};
+      return {v: false, t: 'endobj'};
     }
 
     if (buf[bufp+0] === 120 &&  /* x */
@@ -328,7 +328,7 @@ function PDFLexer(buf) {
         buf[bufp+2] === 101 &&  /* e */
         buf[bufp+3] === 102) {  /* f */
       bufp += 4;
-      return {v: null, t: 'xref', s: startp, e: bufp};
+      return {v: null, t: 'xref'};
     }
 
     if (buf[bufp+0] === 115 &&  /* s */
@@ -341,7 +341,7 @@ function PDFLexer(buf) {
         buf[bufp+7] === 101 &&  /* e */
         buf[bufp+8] === 102) {  /* f */
       bufp += 9;
-      return {v: null, t: 'startxref', s: startp, e: bufp};
+      return {v: null, t: 'startxref'};
     }
 
     // "The delimiter characters (, ), <, >, [, ], {, }, /, and % are special."
@@ -354,12 +354,12 @@ function PDFLexer(buf) {
           c = buf[++bufp];
         } while (c ===  0 || c ===  9 || c === 10 ||
                  c === 12 || c === 13 || c === 32);
-        return {v: null, t: 'ws', s: startp, e: bufp};
+        return {v: null, t: 'ws'};
       // Comments.
       case 37: /* % */
         // Seek up to newline.  Let the lexer process as whitespace next pass.
         while (bufp < buflen && c !== 10 && c !== 13) c = buf[++bufp];
-        return {v: null, t: 'cmt', s: startp, e: bufp};
+        return {v: null, t: 'cmt'};
       // 3.2.2 - Numeric Objects.
       case 48:  /* 0 */ case 49:  /* 1 */ case 50:  /* 2 */ case 51:  /* 3 */
       case 52:  /* 4 */ case 53:  /* 5 */ case 54:  /* 6 */ case 55:  /* 7 */
@@ -380,8 +380,7 @@ function PDFLexer(buf) {
                  c === 46 ||  /* . */
                  c === 45 ||  /* - */
                  c === 43);   /* + */
-          return {v: parseFloat(ascii_substr(startp, bufp)), t: 'num',
-                  s: startp, e: bufp};
+          return {v: parseFloat(ascii_substr(startp, bufp)), t: 'num'};
       // 3.2.3 - String Objects.
       case 40:  /* ( */
         var bytes = [ ];
@@ -417,8 +416,7 @@ function PDFLexer(buf) {
             bytes.push(c);
           }
         }
-        return {v: String.fromCharCode.apply(null, bytes), t: 'str',
-                s: startp, e: bufp};
+        return {v: String.fromCharCode.apply(null, bytes), t: 'str'};
       // 3.2.4 - Name Objects.
       case 47: /* / */
         // "The name may include any regular characters, but not delimiter or
@@ -444,22 +442,21 @@ function PDFLexer(buf) {
                  c !== 125 &&  /* } */
                  c !==  47 &&  /* / */
                  c !==  37);   /* % */
-        return {v: ascii_substr(startp, bufp), t: 'name',
-                s: startp, e: bufp};
+        return {v: ascii_substr(startp, bufp), t: 'name'};
       // 3.2.5 - Array Objects.
       case 91: /* [ */
         ++bufp;
-        return {v: null, t: '[', s: startp, e: bufp};
+        return {v: null, t: '['};
       case 93: /* ] */
         ++bufp;
-        return {v: null, t: ']', s: startp, e: bufp};
+        return {v: null, t: ']'};
       // 3.2.6 - Dictionary Objects.
       // 3.2.3 - String Objects (Hexadecimal Strings).
       case 60:  /* < */
         c = buf[++bufp];
         if (c === 60) {  /* < */
           ++bufp;
-          return {v: null, t: '<<', s: startp, e: bufp};
+          return {v: null, t: '<<'};
         } else {
           var bytes = [ ];
           var num_digits = 0;
@@ -492,16 +489,16 @@ function PDFLexer(buf) {
           // TODO: Is it right to just treat this as a string?  It is safe to
           // go to fromCharCode and back for all 8-bit, so just use a string.
           var str = String.fromCharCode.apply(null, bytes);
-          return {v: str, t: 'hexstr', s: startp, e: bufp};
+          return {v: str, t: 'hexstr'};
         }
       case 62:  /* > */
         if (buf[bufp+1] !== 62) throw "Unexpected single > in lexer"
         bufp += 2;
-        return {v: null, t: '>>', s: startp, e: bufp};
+        return {v: null, t: '>>'};
       // 3.2.9 - Indirect Objects.
       case 82:  /* R */
         ++bufp;
-        return {v: false, t: 'objref', s: startp, e: bufp};
+        return {v: false, t: 'objref'};
       default:
         throw "Unexpected character in lexer: " + buf[bufp] + ' at ' + bufp;
     }
