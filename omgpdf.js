@@ -1008,6 +1008,9 @@ function PDFReader(raw) {
       var first_object = index[i-1];
       var num_entries = index[i];
       total_num_xref_entries += num_entries;
+      // Grow our xref_table array if needed.
+      if (xref_table.length < total_num_xref_entries)
+        xref_table.length = total_num_xref_entries;
       for (var j = 0; j < num_entries; ++j) {
         var id = first_object + j;
         var f0 = (ws0 === 0) ? 1: 0, f1 = 0, f2 = 0;
