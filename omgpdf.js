@@ -425,28 +425,26 @@ function PDFLexer(buf) {
         //  white-space characters"
         // "Note: The token / (a slash followed by no regular characters) is a
         //  valid name."
-        while (true) {
-          ++bufp;
-          if (buf[bufp] ===   0 ||  /* \000 */
-              buf[bufp] ===   9 ||  /* \t */
-              buf[bufp] ===  10 ||  /* \n */
-              buf[bufp] ===  12 ||  /* \f */
-              buf[bufp] ===  13 ||  /* \r */
-              buf[bufp] ===  32 ||  /*   */
-              buf[bufp] ===  40 ||  /* ( */
-              buf[bufp] ===  41 ||  /* ) */
-              buf[bufp] ===  60 ||  /* < */
-              buf[bufp] ===  62 ||  /* > */
-              buf[bufp] ===  91 ||  /* [ */
-              buf[bufp] ===  93 ||  /* ] */
-              buf[bufp] === 123 ||  /* { */
-              buf[bufp] === 125 ||  /* } */
-              buf[bufp] ===  47 ||  /* / */
-              buf[bufp] ===  37) {  /* % */
-            break;
-          }
-        }
-        return {v: buf.slice(startp, bufp).toString('ascii'), t: 'name',
+        do {
+          c = buf[++bufp];
+        } while (bufp < buflen && 
+                 c !==   0 &&  /* \000 */
+                 c !==   9 &&  /* \t */
+                 c !==  10 &&  /* \n */
+                 c !==  12 &&  /* \f */
+                 c !==  13 &&  /* \r */
+                 c !==  32 &&  /*   */
+                 c !==  40 &&  /* ( */
+                 c !==  41 &&  /* ) */
+                 c !==  60 &&  /* < */
+                 c !==  62 &&  /* > */
+                 c !==  91 &&  /* [ */
+                 c !==  93 &&  /* ] */
+                 c !== 123 &&  /* { */
+                 c !== 125 &&  /* } */
+                 c !==  47 &&  /* / */
+                 c !==  37);   /* % */
+        return {v: ascii_substr(startp, bufp), t: 'name',
                 s: startp, e: bufp};
       // 3.2.5 - Array Objects.
       case 91: /* [ */
@@ -458,17 +456,17 @@ function PDFLexer(buf) {
       // 3.2.6 - Dictionary Objects.
       // 3.2.3 - String Objects (Hexadecimal Strings).
       case 60:  /* < */
-        ++bufp;
-        if (buf[bufp] === 60) {
+        c = buf[++bufp];
+        if (c === 60) {  /* < */
           ++bufp;
           return {v: null, t: '<<', s: startp, e: bufp};
         } else {
           var bytes = [ ];
           var num_digits = 0;
-          digits: for (var b = 0; bufp < buflen; ++num_digits, ++bufp) {
+          digi: for (var b = 0; bufp < buflen; ++num_digits, c = buf[++bufp]) {
             var base = 0;
 
-            switch (buf[bufp]) {
+            switch (c) {
               case 48: case 49: case 50: case 51: case 52:
               case 53: case 54: case 55: case 56: case 57:              // 0-9
                 base = 48; break;
@@ -477,12 +475,12 @@ function PDFLexer(buf) {
               case 97: case 98: case 99: case 100: case 101: case 102:  // a-f
                 base = 87; break;
               case 62:                                                  // >
-                ++bufp; break digits;
+                ++bufp; break digi;
               default:
                 throw 'Invalid character in hex string';
             }
 
-            b = (b << 4) | (buf[bufp] - base);
+            b = (b << 4) | (c - base);
             if (num_digits & 1 === 1) {
               bytes.push(b);
               b = 0;
@@ -499,13 +497,13 @@ function PDFLexer(buf) {
       case 62:  /* > */
         if (buf[bufp+1] !== 62) throw "Unexpected single > in lexer"
         bufp += 2;
-          return {v: null, t: '>>', s: startp, e: bufp};
+        return {v: null, t: '>>', s: startp, e: bufp};
       // 3.2.9 - Indirect Objects.
       case 82:  /* R */
         ++bufp;
         return {v: false, t: 'objref', s: startp, e: bufp};
       default:
-        throw "Lexer: " + buf[bufp];
+        throw "Unexpected character in lexer: " + buf[bufp] + ' at ' + bufp;
     }
   };
 
