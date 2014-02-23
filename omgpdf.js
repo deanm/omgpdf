@@ -608,10 +608,11 @@ function PDFWriter(buf) {
         emit_string_line('\nstream');
         obj.data.copy(buf, bufp);
         bufp += obj.data.length;
-        emit_string('endstream');
+        emit_string('\nendstream');
         break;
       default:
         console.log('Unknown type in emit: ' + typ);
+        break;
     }
   }
 
