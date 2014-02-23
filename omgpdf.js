@@ -110,6 +110,12 @@ function Dictionary(a) {
     }
     return false;
   };
+
+  this.dup = function() {  // Shallow copy.
+    return new Dictionary(a.slice());
+  };
+
+  this.internal_array = function() { return a; };
 }
 
 function IndirectObject(id, gen, obj) {
