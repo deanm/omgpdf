@@ -1218,6 +1218,8 @@ function PDFReader(raw) {
     dict.del('/Prev');
     dict.del('/Index');
     dict.del('/W');
+    dict.del('/Length');
+    dict.del('/ID');  // FIXME
     return writer.write(header, object_table, dict);
   };
 }
