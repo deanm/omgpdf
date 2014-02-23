@@ -8,6 +8,7 @@ function zero_pad(len, num) {
          str = Array.prototype.join.call({length: len-str.length+1}, '0') + str;
 }
 
+/*
 function obj_type(o) {
   switch (typeof(o)) {
     case 'boolean':
@@ -30,7 +31,6 @@ function obj_type(o) {
   return null;
 }
 
-/*
 function obj_is_type(o, typ) {
   switch (typ) {
     case 'bool':   return typeof(o) === 'boolean';
@@ -71,11 +71,11 @@ function Dictionary(a) {
     return undefined;
   };
 
-  this.get_type_checked = function(key, typ) {
+  this.get_checked = function(key, checker) {
     for (var i = 1, il = a.length; i < il; i += 2) {
       if (a[i-1].str === key) {
         var v = a[i];
-        if (obj_type(v) !== typ) throw 'Type expectation mismatch: ' + typ;
+        if (checker(v) !== true) throw 'get_checked expectation failed';
         return v;
       }
     }
@@ -680,7 +680,7 @@ function PDFReader(raw) {
         var s = consume_object();
         if (s !== null && s instanceof Stream) {  // Process dict+stream.
           s.dict = dict;
-          var streamlen = dict.get_type_checked('/Length', 'num');
+          var streamlen = dict.get_checked('/Length', obj_is_num);
           if (streamlen !== s.data.length) {
             // We don't properly handle EOL in the stream consumption, so we
             // assume if we're off by 1 or 2 it's because of EOL markers.
@@ -905,17 +905,17 @@ function PDFReader(raw) {
 
     trailer_dict = xref_stream.dict;
 
-    if (trailer_dict.get_type_checked('/Type', 'name').str !== '/XRef')
+    if (trailer_dict.get_checked('/Type', obj_is_name).str !== '/XRef')
       throw 'Invalid xref stream type.';
 
-    var size = trailer_dict.get_type_checked('/Size', 'num');
+    var size = trailer_dict.get_checked('/Size', obj_is_num);
 
     if (num_objects === null)  // Appears right to keep the first /Size.
       num_objects = size;
 
     var index = [0, size];
     if (trailer_dict.has('/Index')) {
-      index = trailer_dict.get_type_checked('/Index', 'array');
+      index = trailer_dict.get_checked('/Index', obj_is_array);
       for (var i = 0, il = index.length; i < il; ++i) {
         if (!obj_is_num(index[i])) throw 'Non-number in /Index';
       }
