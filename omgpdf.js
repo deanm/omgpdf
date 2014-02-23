@@ -897,7 +897,7 @@ function PDFReader(raw) {
 
   this.map_streams = function(callback) {
     for (var i = 0, il = object_table.length; i < il; ++i) {
-      var obj = objtec_table[i];
+      var obj = object_table[i];
       if (obj === undefined) continue;  // FIXME
       var stream = obj.obj;
       if (!obj_is_stream(stream)) continue;
